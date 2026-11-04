@@ -1,0 +1,29 @@
+configuration:
+  api_key:
+    name: Clé API SportsAPI Pro
+    description: Clé du compte sportsapipro.com (offre gratuite suffisante).
+  equipe_nanterre:
+    name: Équipe suivie en priorité
+    description: Identifiant V2 de l'équipe dont tous les matchs sont suivis, toutes compétitions (Nanterre 92 = 53125).
+  tournois_elite:
+    name: Tournois du championnat
+    description: Identifiants V2 des tournois dont tous les matchs sont suivis (Betclic Élite = 156).
+  tournois_europe:
+    name: Tournois européens
+    description: Identifiants V2 des coupes d'Europe, suivies seulement quand un club du pays choisi y joue.
+  pays_europe:
+    name: Pays des clubs suivis en Europe
+    description: Code ISO à deux lettres.
+  delai_fin:
+    name: Délai de confirmation de fin (s)
+    description: Durée pendant laquelle le statut « terminé » doit rester stable avant de déclarer le match fini.
+  intervalle_push:
+    name: Intervalle minimal entre deux mises à jour live (s)
+    description: Cadence maximale des événements « maj » destinés aux téléphones, par match.
+  historique_jours:
+    name: Historique des résultats (jours)
+  quota_jour:
+    name: Quota de requêtes par jour
+    description: Plafond de l'offre (100 en gratuit). Une réserve est gardée pour confirmer les fins de match.
+  log_level:
+    name: Niveau de journal

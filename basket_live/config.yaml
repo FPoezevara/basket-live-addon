@@ -1,0 +1,44 @@
+name: Basket Live
+version: "0.1.0"
+slug: basket_live
+description: Scores en direct de la Betclic Élite, de Nanterre et des clubs français en coupe d'Europe, publiés dans MQTT
+url: https://github.com/FPoezevara/basket-live-addon
+arch:
+  - amd64
+  - aarch64
+# Image de base HA avec s6-overlay v3 : l'init Docker doit être désactivé
+init: false
+startup: application
+boot: auto
+hassio_api: true
+services:
+  - mqtt:need
+options:
+  api_key: ""
+  equipe_nanterre: 53125
+  tournois_elite:
+    - 156
+  tournois_europe:
+    - 138
+    - 141
+    - 9357
+    - 2165
+  pays_europe: FR
+  delai_fin: 300
+  intervalle_push: 60
+  historique_jours: 7
+  quota_jour: 100
+  log_level: info
+schema:
+  api_key: password
+  equipe_nanterre: int
+  tournois_elite:
+    - int
+  tournois_europe:
+    - int
+  pays_europe: str
+  delai_fin: int(60,1800)
+  intervalle_push: int(15,300)
+  historique_jours: int(1,30)
+  quota_jour: int(20,100000)
+  log_level: list(debug|info|warning|error)
