@@ -12,7 +12,7 @@
  *     7521abea3321478f8c461ee465767fcb: ilona
  */
 
-const VERSION = "1.0.0";
+const VERSION = "1.1.0";
 const EUROPE = new Set([138, 141, 9357, 2165]);
 const AUCUN = "—";
 
@@ -200,11 +200,84 @@ const STYLE = `
   .bascule.ext .curseur { left: calc(100% - 23px); background: var(--accent); }
 `;
 
+/*
+ * En-tête de l'onglet : titre encadré de deux ballons, sur un fond de terrain dessiné en SVG.
+ *   type: custom:basket-entete-card
+ *   titre: Basket Live          # facultatif
+ */
+const TERRAIN = `
+  <svg class="terrain" viewBox="0 0 940 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <g fill="none" stroke="#fff" stroke-width="3">
+      <rect x="10" y="10" width="920" height="180" rx="4"/>
+      <line x1="470" y1="10" x2="470" y2="190"/>
+      <circle cx="470" cy="100" r="42"/>
+      <circle cx="470" cy="100" r="12"/>
+      <rect x="10" y="62" width="130" height="76"/>
+      <rect x="800" y="62" width="130" height="76"/>
+      <path d="M140 62 A38 38 0 0 1 140 138"/>
+      <path d="M800 62 A38 38 0 0 0 800 138"/>
+      <path d="M10 22 L60 22 A150 150 0 0 1 60 178 L10 178"/>
+      <path d="M930 22 L880 22 A150 150 0 0 0 880 178 L930 178"/>
+    </g>
+  </svg>`;
+
+class BasketEnteteCard extends HTMLElement {
+  setConfig(config) {
+    this._config = { titre: "Basket Live", ...config };
+    if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+    this._rendre();
+  }
+
+  set hass(_hass) {}
+
+  getCardSize() {
+    return 2;
+  }
+
+  getGridOptions() {
+    return { columns: "full", rows: 2, min_rows: 2 };
+  }
+
+  _rendre() {
+    this.shadowRoot.innerHTML = `
+      <style>${STYLE_ENTETE}</style>
+      <ha-card>
+        ${TERRAIN}
+        <div class="bandeau">
+          <span class="ballon gauche">🏀</span>
+          <h1>${echapper(this._config.titre)}</h1>
+          <span class="ballon droite">🏀</span>
+        </div>
+      </ha-card>`;
+  }
+}
+
+const STYLE_ENTETE = `
+  ha-card { display: block; container-type: inline-size; position: relative; overflow: hidden; height: 100%; min-height: 104px; border: none;
+            background:
+              radial-gradient(ellipse at 50% 120%, rgba(255,255,255,.18), transparent 60%),
+              linear-gradient(135deg, #F26B1D 0%, #C2410C 48%, #7C2D12 78%, #1C1917 100%); }
+  .terrain { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .16; }
+  .bandeau { position: relative; height: 100%; min-height: 104px; display: flex; align-items: center;
+             justify-content: center; gap: clamp(8px, 3cqw, 18px); padding: 0 12px; box-sizing: border-box; }
+  h1 { margin: 0; color: #fff; font-size: clamp(1.2rem, 7.5cqw, 2.4rem); font-weight: 800; letter-spacing: .05em;
+       text-transform: uppercase; text-shadow: 0 2px 10px rgba(0,0,0,.35); white-space: nowrap; }
+  .ballon { font-size: clamp(1.2rem, 7cqw, 2.3rem); filter: drop-shadow(0 3px 4px rgba(0,0,0,.4));
+            animation: rebond 2.8s ease-in-out infinite; }
+  .ballon.droite { animation-delay: 1.4s; }
+  @keyframes rebond { 0%, 100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(-5px) rotate(20deg); } }
+  @media (prefers-reduced-motion: reduce) { .ballon { animation: none; } }
+`;
+
 customElements.define("basket-a-venir-card", BasketAVenirCard);
+customElements.define("basket-entete-card", BasketEnteteCard);
 window.customCards = window.customCards || [];
-window.customCards.push({
-  type: "basket-a-venir-card",
-  name: "Basket Live · Aujourd'hui et demain",
-  description: "Matchs à venir groupés par jour, pronostic par bascule à trois positions.",
-});
+window.customCards.push(
+  {
+    type: "basket-a-venir-card",
+    name: "Basket Live · Aujourd'hui et demain",
+    description: "Matchs à venir groupés par jour, pronostic par bascule à trois positions.",
+  },
+  { type: "basket-entete-card", name: "Basket Live · En-tête", description: "Titre sur fond de terrain de basket." },
+);
 console.info(`%c basket-a-venir-card ${VERSION} `, "background:#F26B1D;color:#fff;border-radius:3px");
