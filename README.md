@@ -54,6 +54,10 @@ Dans les événements, le chrono est extrapolé à l'instant de l'envoi ; dans l
 2. Installer « Basket Live », renseigner la clé API dans Configuration, démarrer.
 3. Vérifier dans le journal : `Calendrier du … : N matchs suivis` et `Connecté à MQTT`.
 
+## Côté Home Assistant
+
+`homeassistant/packages/basket.yaml` (préférences, lives, résultats, sélecteurs) et `homeassistant/dashboard-basket.yaml` (tableau de bord) sont la référence versionnée de ce qui est installé dans `/homeassistant`.
+
 ## Tests
 
 ```bash

@@ -98,14 +98,17 @@ script:
                   # Mise en page imposée par l'app (HALockScreenView) : icône | titre sur 1 ligne,
                   # message dessous | colonne de droite ; barre de progression sur toute la largeur.
                   title: "{{ dom }} - {{ ext }}"
-                  # Score en tête de la seconde ligne (aucun emplacement en bas à droite)
-                  message: "{{ score ~ '  ·  ' if a_score else '' }}{{ ligne }}"
+                  message: "{{ ligne }}"
                   data:
                     tag: "{{ etiquette }}"
                     live_update: true
-                    # Espace sans chasse : vide la colonne de droite, qui afficherait sinon le
-                    # pourcentage de la barre, et laisse toute la largeur au titre
-                    critical_text: "​"
+                    # Même champ pour la colonne de droite de l'écran verrouillé et la partie droite
+                    # de la Dynamic Island compacte (50 pt max) : score compact, sans espaces.
+                    # Avant l'entre-deux : l'heure, pour ne pas afficher le pourcentage de la barre.
+                    critical_text: >-
+                      {{ match.score_dom ~ '-' ~ match.score_ext if a_score
+                         else (as_datetime(match.debut) | as_local).strftime('%H:%M') if match.debut is defined
+                         else match.statut_court | default(match.statut) }}
                     progress: "{{ avance }}"
                     progress_max: 100
                     notification_icon: mdi:basketball
