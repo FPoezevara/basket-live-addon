@@ -56,7 +56,7 @@ Dans les événements, le chrono est extrapolé à l'instant de l'envoi ; dans l
 
 ## Concours de pronostics
 
-Pour chaque match à venir et chaque joueur (option `joueurs`), l'add-on publie un menu `select` (« jeu. 18:15 · Efes - Paris », options `—`, équipe à domicile, équipe à l'extérieur ; attributs `joueur`, `debut`, `points_en_jeu`). Le menu disparaît à l'entre-deux, ce qui fige le pronostic. À la fin confirmée : 2 points pour un bon pronostic sur un match de Nanterre, 1 point sinon.
+Pour chaque match à venir et chaque joueur (option `joueurs`), l'add-on publie un menu `select` (« jeu. 18:15 · Efes - Paris », options `—`, équipe à domicile, équipe à l'extérieur ; attributs `joueur`, `debut`, `points_en_jeu`). Le menu disparaît à l'entre-deux, ce qui fige le pronostic. À la fin confirmée, un bon pronostic rapporte 3 points pour Nanterre en Betclic Élite, 2 pour Nanterre dans une autre compétition ou pour un match d'Élite sans Nanterre, 1 pour les autres.
 
 | Entité | État | Attributs |
 |---|---|---|

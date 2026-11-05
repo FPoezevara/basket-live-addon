@@ -1,5 +1,9 @@
 # Journal des versions
 
+## 0.2.1
+
+- Nouveau barème des pronostics : 3 points pour Nanterre en Betclic Élite, 2 pour Nanterre dans une autre compétition et pour un match d'Élite sans Nanterre, 1 pour les autres.
+
 ## 0.2.0
 
 - Concours de pronostics : un menu par match à venir et par joueur, fermé à l'entre-deux.

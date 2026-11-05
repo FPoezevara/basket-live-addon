@@ -61,7 +61,7 @@ class App:
         self.sale = True
         self.etat_modifie = False
         self.fichier_etat = cfg.dossier_donnees / "etat.json"
-        self.pronos = Pronos(cfg.joueurs)
+        self.pronos = Pronos(cfg.joueurs, set(cfg.tournois_elite))
 
     # --- utilitaires ---------------------------------------------------------------------
 

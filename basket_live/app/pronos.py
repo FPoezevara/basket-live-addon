@@ -1,5 +1,8 @@
 """Concours de pronostics : un menu par match à venir et par joueur, fermé à l'entre-deux,
-points attribués à la fin confirmée (2 pour un match de Nanterre, 1 sinon), classement par saison.
+points attribués à la fin confirmée, classement par saison.
+
+Barème : 3 points pour Nanterre en Betclic Élite ; 2 pour Nanterre dans une autre compétition
+et pour un match d'Élite sans Nanterre ; 1 pour les autres (coupes d'Europe sans Nanterre).
 
 Les pronostics de l'autre restent invisibles sur le tableau de bord jusqu'à l'entre-deux : chacun
 n'y voit que ses menus, et l'historique ne contient que des matchs déjà commencés.
@@ -30,8 +33,11 @@ def ouvert(m: Match, maintenant: float) -> bool:
     return not m.termine and m.code == CODE_A_VENIR and maintenant < m.debut_ts
 
 
-def points_en_jeu(m: Match) -> int:
-    return 2 if m.categorie == "nanterre" else 1
+def points_en_jeu(m: Match, elite: set[int]) -> int:
+    en_elite = m.tournoi_id in elite
+    if m.categorie == "nanterre":
+        return 3 if en_elite else 2
+    return 2 if en_elite else 1
 
 
 def gagnant(m: Match) -> str | None:
@@ -48,8 +54,9 @@ def libelles(m: Match) -> dict[str, str]:
 
 
 class Pronos:
-    def __init__(self, joueurs: list[str]):
+    def __init__(self, joueurs: list[str], elite: set[int]):
         self.joueurs = joueurs
+        self.elite = elite
         self.choix: dict[int, dict[str, str]] = {}     # id du match -> joueur -> "dom" | "ext"
         self.historique: list[dict] = []               # matchs terminés ayant au moins un pronostic
         self.publies: set[str] = set()                 # menus publiés en découverte (« joueur_id »)
@@ -91,7 +98,7 @@ class Pronos:
         noms = libelles(m)
         g = gagnant(m) if m.termine else None
         choix = self.choix.get(m.id, {})
-        en_jeu = points_en_jeu(m)
+        en_jeu = points_en_jeu(m, self.elite)
         return {
             "id": m.id,
             "debut": datetime.fromtimestamp(m.debut_ts, tz).isoformat(),
@@ -166,7 +173,8 @@ class Pronos:
                     (f"homeassistant/select/basket_live/prono_{cle}/config", json.dumps(conf, ensure_ascii=False)),
                     (f"{base}/attributs", json.dumps({"joueur": j, "debut": d.isoformat(), "match_id": m.id,
                                                       "tournoi": m.tournoi, "categorie": m.categorie,
-                                                      "points_en_jeu": points_en_jeu(m)}, ensure_ascii=False)),
+                                                      "points_en_jeu": points_en_jeu(m, self.elite)},
+                                                     ensure_ascii=False)),
                     (f"{base}/etat", noms[choix] if choix else AUCUN),
                 ]
         for cle in sorted(self.publies - ouverts):

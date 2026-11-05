@@ -43,7 +43,7 @@ def test_menus_ouverts_puis_fermes_a_lentre_deux(tmp_path):
     assert conf["name"] == "jeu. 20:00 · Nanterre - Bourg-en-Bresse"
     assert conf["options"] == [AUCUN, "Nanterre", "Bourg-en-Bresse"]
     attrs = json.loads(bus.retenus["basket_live/prono/francis/1/attributs"])
-    assert attrs["joueur"] == "francis" and attrs["points_en_jeu"] == 2
+    assert attrs["joueur"] == "francis" and attrs["points_en_jeu"] == 3
     # Entre-deux du premier match : ses deux menus disparaissent (configuration retenue vidée)
     h.t = T + 60
     app.publier()
@@ -75,7 +75,7 @@ def test_saisie_verrou_points_et_classement(tmp_path):
     assert revele[0]["pronos"] == {"francis": "Nanterre", "ilona": "Bourg-en-Bresse"}
     assert revele[0]["resultats"] == {"francis": None, "ilona": None}
 
-    # Fins : Nanterre gagne (2 pts à Francis), Wrocław perd (0 pour Francis, Ilona n'avait pas joué)
+    # Fins : Nanterre gagne en Élite (3 pts à Francis), Wrocław perd (0 pour Francis, Ilona n'avait pas joué)
     m1, m2 = app.matchs[1], app.matchs[2]
     m1.score_dom, m1.score_ext = 85, 80
     app.finaliser(m1)
@@ -86,10 +86,10 @@ def test_saisie_verrou_points_et_classement(tmp_path):
     histo = json.loads(bus.retenus["basket_live/pronostics/attributs"])
     assert [x["id"] for x in histo["matchs"]] == [2, 1]
     assert histo["matchs"][1]["resultats"] == {"francis": True, "ilona": False}
-    assert histo["matchs"][1]["points"] == {"francis": 2, "ilona": 0}
+    assert histo["matchs"][1]["points"] == {"francis": 3, "ilona": 0}
     assert histo["matchs"][0]["pronos"]["ilona"] is None
     classement = json.loads(bus.retenus["basket_live/classement/attributs"])
-    assert classement["joueurs"][0] == {"nom": "Francis", "points": 2, "bons": 1, "pronos": 2}
+    assert classement["joueurs"][0] == {"nom": "Francis", "points": 3, "bons": 1, "pronos": 2}
     assert classement["joueurs"][1] == {"nom": "Ilona", "points": 0, "bons": 0, "pronos": 1}
     assert bus.retenus["basket_live/classement/etat"] == "Francis"
     assert bus.retenus["basket_live/pronostics/etat"] == "2"
@@ -105,3 +105,17 @@ def test_saison():
     assert saison(datetime(2026, 11, 5, tzinfo=TZ).timestamp(), TZ) == "2026-2027"
     assert saison(datetime(2027, 6, 10, tzinfo=TZ).timestamp(), TZ) == "2026-2027"
     assert saison(datetime(2027, 7, 1, 12, tzinfo=TZ).timestamp(), TZ) == "2027-2028"
+
+
+def test_bareme():
+    from app.modele import Match
+    from app.pronos import points_en_jeu
+    def m(cat, tid):
+        return Match(id=1, categorie=cat, tournoi_id=tid, tournoi="x", domicile="a", domicile_id=1, domicile_code=None,
+                     exterieur="b", exterieur_id=2, exterieur_code=None, debut_ts=0)
+    elite = {156}
+    assert points_en_jeu(m("nanterre", 156), elite) == 3
+    assert points_en_jeu(m("nanterre", 141), elite) == 2      # Nanterre en EuroCup
+    assert points_en_jeu(m("nanterre", 1666), elite) == 2     # Nanterre en Coupe de France
+    assert points_en_jeu(m("elite", 156), elite) == 2
+    assert points_en_jeu(m("europe", 138), elite) == 1

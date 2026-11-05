@@ -118,7 +118,7 @@ views:
               {{ medailles[loop.index0] if loop.index0 < 3 else '' }} **{{ j.nom }}** · {{ j.points }} pt{{ 's' if j.points > 1 else '' }} · {{ j.bons }} bon{{ 's' if j.bons > 1 else '' }} pronostic{{ 's' if j.bons > 1 else '' }} sur {{ j.pronos }}
               {% endfor %}
 
-              *Saison {{ state_attr('sensor.basket_live_classement', 'saison') }} · 2 points pour un match de Nanterre, 1 pour les autres.*
+              *Saison {{ state_attr('sensor.basket_live_classement', 'saison') }} · Nanterre en Élite : 3 pts · Nanterre ailleurs ou Élite : 2 pts · Europe : 1 pt.*
       - type: grid
         column_span: 2
         cards:
