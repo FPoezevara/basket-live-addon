@@ -95,13 +95,17 @@ script:
             sequence:
               - action: notify.mobile_app_iphone_de_francis_2
                 data:
-                  # notification_icon n'est pas affiché sur l'écran verrouillé : le ballon va dans le titre
-                  title: "🏀 {{ dom }} - {{ ext }}"
-                  message: "{{ ligne }}"
+                  # Mise en page imposée par l'app (HALockScreenView) : icône | titre sur 1 ligne,
+                  # message dessous | colonne de droite ; barre de progression sur toute la largeur.
+                  title: "{{ dom }} - {{ ext }}"
+                  # Score en tête de la seconde ligne (aucun emplacement en bas à droite)
+                  message: "{{ score ~ '  ·  ' if a_score else '' }}{{ ligne }}"
                   data:
                     tag: "{{ etiquette }}"
                     live_update: true
-                    critical_text: "{{ score if a_score else match.statut_court | default(match.statut) }}"
+                    # Espace sans chasse : vide la colonne de droite, qui afficherait sinon le
+                    # pourcentage de la barre, et laisse toute la largeur au titre
+                    critical_text: "​"
                     progress: "{{ avance }}"
                     progress_max: 100
                     notification_icon: mdi:basketball
@@ -112,7 +116,7 @@ script:
               - action: notify.mobile_app_sm_g998u1
                 data:
                   # Android a toute la largeur : le score tient dans le titre
-                  title: "🏀 {{ dom ~ '  ' ~ score ~ '  ' ~ ext if a_score else dom ~ ' - ' ~ ext }}"
+                  title: "{{ dom ~ '  ' ~ score ~ '  ' ~ ext if a_score else dom ~ ' - ' ~ ext }}"
                   message: "{{ ligne }}"
                   data:
                     tag: "{{ etiquette }}"

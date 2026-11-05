@@ -62,7 +62,7 @@ NOMS_TOURNOIS_COURTS = {
 PREFIXES_EQUIPE = re.compile(r"^(?:JL|SIG|SLUC|AS|BC|KK|CB|CSP|JDA|ESSM|SCBA)\s+")
 SUFFIXES_EQUIPE = re.compile(r"\s+(?:Sarthe\s+Basket|Basket(?:ball)?(?:\s+Club)?|Sarthe)$")
 # Exceptions appliquées au résultat de la règle
-NOMS_COURTS = {"Bourg": "Bourg-en-Bresse"}
+NOMS_COURTS = {"Bourg": "Bourg-en-Bresse", "Nanterre 92": "Nanterre"}
 
 # Un match terminé plus de 4 h après l'entre-deux est signalé « tardif » (fin rattrapée par le calendrier)
 DELAI_TARDIF = 4 * 3600

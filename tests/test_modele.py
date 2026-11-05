@@ -110,7 +110,7 @@ def test_noms_courts_et_progression():
     assert nom_court("SLUC Nancy Basket") == "Nancy"
     assert nom_court("Paris Basketball") == "Paris"
     assert nom_court("AS Monaco") == "Monaco"
-    assert nom_court("Nanterre 92") == "Nanterre 92"
+    assert nom_court("Nanterre 92") == "Nanterre"
     assert nom_court("Śląsk Wrocław") == "Śląsk Wrocław"
     m = match_elite()
     appliquer(m, {"status.code": 15, "homeScore.current": 45, "awayScore.current": 42}, T0)
