@@ -20,6 +20,7 @@ class Config:
     historique_jours: int
     quota_jour: int
     log_level: str
+    joueurs: list[str]
     mqtt_host: str
     mqtt_port: int
     mqtt_user: str | None
@@ -44,6 +45,7 @@ def charger() -> Config:
         historique_jours=int(options.get("historique_jours", 7)),
         quota_jour=int(options.get("quota_jour", 100)),
         log_level=str(options.get("log_level", "info")).upper(),
+        joueurs=[str(j).strip().lower() for j in options.get("joueurs", ["francis", "ilona"])],
         mqtt_host=os.environ.get("MQTT_HOST", "core-mosquitto"),
         mqtt_port=int(os.environ.get("MQTT_PORT") or 1883),
         mqtt_user=os.environ.get("MQTT_USER") or None,

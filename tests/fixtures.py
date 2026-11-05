@@ -38,7 +38,7 @@ KAZ = (29868, "National League")
 def config(dossier: Path, **kw) -> Config:
     base = dict(
         api_key="cle-test", equipe_nanterre=NANTERRE, tournois_elite=[156], tournois_europe=[138, 141, 9357, 2165],
-        pays_europe="FR", delai_fin=300, intervalle_push=60, historique_jours=7, quota_jour=100, log_level="DEBUG",
+        pays_europe="FR", delai_fin=300, intervalle_push=60, historique_jours=7, quota_jour=100, log_level="DEBUG", joueurs=["francis", "ilona"],
         mqtt_host="localhost", mqtt_port=1883, mqtt_user=None, mqtt_password=None, dossier_donnees=dossier,
         fuseau="Europe/Paris", api_base="http://127.0.0.1:1", ws_url="ws://127.0.0.1:1/ws",
     )

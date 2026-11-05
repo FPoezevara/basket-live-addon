@@ -1,6 +1,7 @@
 # Tableau de bord « Basket » (URL : dashboard-basket)
 # À coller dans : tableau de bord > crayon > ⋮ > Éditeur de configuration brute.
 # Remplacer ID_FRANCIS et ID_ILONA par les user_id (voir la procédure).
+# Carte HACS requise : auto-entities (menus de pronostics).
 title: Basket
 views:
   - title: Direct
@@ -16,10 +17,11 @@ views:
             icon: mdi:broadcast
           - type: markdown
             content: |-
+              {% set eu = [138, 141, 9357, 2165] %}
               {% set l = state_attr('sensor.basket_live_lives_en_cours', 'matchs') or [] %}
               {% if l | count == 0 %}*Aucun match en cours.*{% endif %}
               {% for m in l %}
-              **{{ m.tournoi }}** · {{ m.statut }}{% if m.chrono %} · {{ m.chrono }}{% endif %}
+              **{{ '🇪🇺' if m.tournoi_id in eu else '🇫🇷' }} {{ m.tournoi }}** · {{ m.statut }}{% if m.chrono %} · {{ m.chrono }}{% endif %}
 
               {% set ot = m.prolongation_dom is not none %}
               | | 1 | 2 | 3 | 4 |{% if ot %} P |{% endif %} **Total** |
@@ -35,24 +37,73 @@ views:
             icon: mdi:calendar-clock
           - type: markdown
             content: |-
-              {% set jours = ['lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.', 'dim.'] %}
+              {% set jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'] %}
+              {% set eu = [138, 141, 9357, 2165] %}
               {% set l = state_attr('sensor.basket_live_matchs_a_venir', 'matchs') or [] %}
               {% if l | count == 0 %}*Aucun match prévu.*{% endif %}
-              {% for m in l %}
+              {% set ns = namespace(jour='') %}
+              {% for m in l | sort(attribute='debut') %}
               {% set d = as_datetime(m.debut) | as_local %}
-              - **{{ jours[d.weekday()] }} {{ d.strftime('%H:%M') }}** · {{ m.titre }} · *{{ m.tournoi }}*{% if m.code in [60, 70] %} · {{ m.statut }}{% endif %}
+              {% set j = jours[d.weekday()] ~ ' ' ~ d.strftime('%d/%m') %}
+              {% if j != ns.jour %}{% set ns.jour = j %}
+
+              **{{ j }}**
+              {% endif %}
+              - {{ d.strftime('%H:%M') }} : {{ m.titre }} ({{ '🇪🇺' if m.tournoi_id in eu else '🇫🇷' }} {{ m.tournoi }}){% if m.code in [60, 70] %} · {{ m.statut }}{% endif %}
               {% endfor %}
+          # Un menu par match à venir, pour le seul utilisateur connecté ; disparaît à l'entre-deux
+          - type: custom:auto-entities
+            visibility:
+              - condition: user
+                users:
+                  - ID_FRANCIS
+            card:
+              type: entities
+              title: Mes pronostics
+            filter:
+              include:
+                - domain: select
+                  attributes:
+                    joueur: francis
+            sort:
+              method: attribute
+              attribute: debut
+            show_empty: false
+          - type: custom:auto-entities
+            visibility:
+              - condition: user
+                users:
+                  - ID_ILONA
+            card:
+              type: entities
+              title: Mes pronostics
+            filter:
+              include:
+                - domain: select
+                  attributes:
+                    joueur: ilona
+            sort:
+              method: attribute
+              attribute: debut
+            show_empty: false
           - type: heading
             heading: Résultats des 7 derniers jours
             icon: mdi:scoreboard
           - type: markdown
             content: |-
-              {% set jours = ['lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.', 'dim.'] %}
+              {% set jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'] %}
+              {% set eu = [138, 141, 9357, 2165] %}
               {% set l = state_attr('sensor.basket_live_resultats', 'matchs') or [] %}
               {% if l | count == 0 %}*Aucun résultat.*{% endif %}
-              {% for m in l %}
+              {% set ns = namespace(jour='') %}
+              {% for m in l | sort(attribute='debut', reverse=true) %}
               {% set d = as_datetime(m.debut) | as_local %}
-              - {{ jours[d.weekday()] }} {{ d.day }}/{{ d.month }} · {{ m.domicile }} **{{ m.score_dom }} - {{ m.score_ext }}** {{ m.exterieur }}{{ ' a.p.' if m.prolongation_dom is not none else '' }} · *{{ m.tournoi }}*
+              {% set j = jours[d.weekday()] ~ ' ' ~ d.strftime('%d/%m') %}
+              {% if j != ns.jour %}{% set ns.jour = j %}
+
+              **{{ j }}**
+              {% endif %}
+              - {{ m.domicile }} **{{ m.score_dom }} - {{ m.score_ext }}** {{ m.exterieur }}{{ ' a.p.' if m.prolongation_dom is not none else '' }} ({{ '🇪🇺' if m.tournoi_id in eu else '🇫🇷' }} {{ m.tournoi }})
               {% endfor %}
       - type: grid
         cards:
@@ -92,3 +143,48 @@ views:
               - entity: sensor.basket_live_requetes_du_jour
               - entity: sensor.basket_live_dernier_calendrier
               - entity: button.basket_live_rafraichir_le_calendrier
+
+  - title: Pronostics
+    path: pronostics
+    icon: mdi:crystal-ball
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
+        cards:
+          - type: heading
+            heading: Classement
+            icon: mdi:podium
+          - type: markdown
+            content: |-
+              {% set c = state_attr('sensor.basket_live_classement', 'joueurs') or [] %}
+              {% set medailles = ['🥇', '🥈', '🥉'] %}
+              {% for j in c %}
+              {{ medailles[loop.index0] if loop.index0 < 3 else '' }} **{{ j.nom }}** · {{ j.points }} pt{{ 's' if j.points > 1 else '' }} · {{ j.bons }} bon{{ 's' if j.bons > 1 else '' }} pronostic{{ 's' if j.bons > 1 else '' }} sur {{ j.pronos }}
+              {% endfor %}
+
+              *Saison {{ state_attr('sensor.basket_live_classement', 'saison') }} · 2 points pour un match de Nanterre, 1 pour les autres.*
+      - type: grid
+        column_span: 2
+        cards:
+          - type: heading
+            heading: Matchs pronostiqués
+            icon: mdi:history
+          - type: markdown
+            content: |-
+              {% set eu = [138, 141, 9357, 2165] %}
+              {% set l = state_attr('sensor.basket_live_pronostics', 'matchs') or [] %}
+              {% macro cellule(m, j) -%}
+                {%- set p = m.pronos[j] -%}
+                {%- set r = m.resultats[j] -%}
+                {%- if p is none -%}·
+                {%- elif r is none -%}{{ p }}
+                {%- elif r -%}<font color="#2e7d32">✔ {{ p }} (+{{ m.points[j] }})</font>
+                {%- else -%}<font color="#c62828">✘ {{ p }}</font>
+                {%- endif -%}
+              {%- endmacro %}
+              {% if l | count == 0 %}*Aucun match pronostiqué pour l'instant. Les pronostics apparaissent ici à l'entre-deux.*{% else %}
+              | Date | Match | Score | Ilona | Francis |
+              |:--|:--|:-:|:--|:--|
+              {% for m in l %}{% set d = as_datetime(m.debut) | as_local %}| {{ d.strftime('%d/%m') }} | {{ '🇪🇺' if m.tournoi_id in eu else '🇫🇷' }} {{ m.domicile }} - {{ m.exterieur }} | {{ m.score if m.termine else '*en cours*' }} | {{ cellule(m, 'ilona') }} | {{ cellule(m, 'francis') }} |
+              {% endfor %}{% endif %}

@@ -1,0 +1,107 @@
+import json
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+from app.main import App
+from app.pronos import AUCUN, saison
+from fixtures import ELITE, EUROCUP, NANTERRE, FauxBus, config, equipe, evenement
+from test_app import FausseApi, Horloge
+
+TZ = ZoneInfo("Europe/Paris")
+T = datetime(2026, 11, 5, 20, 0, tzinfo=TZ).timestamp()
+JOUR = datetime.fromtimestamp(T, TZ).date()
+
+
+def ev_nanterre(code=0, score=None):
+    return evenement(1, ELITE, equipe(NANTERRE, "Nanterre 92", code="NAN"), equipe(2, "JL Bourg Basket", code="JLB"),
+                     int(T), code, score)
+
+
+def ev_europe(code=0, score=None):
+    return evenement(2, EUROCUP, equipe(21, "Śląsk Wrocław", pays="PL"), equipe(22, "JL Bourg Basket"),
+                     int(T) + 3600, code, score)
+
+
+def faire(tmp_path, h):
+    bus = FauxBus()
+    app = App(config(tmp_path), FausseApi(), bus=bus, horloge=h)
+    app.fusionner([ev_nanterre(), ev_europe()], JOUR)
+    return app, bus
+
+
+def menus(bus):
+    return {t: json.loads(p) for t, p in bus.retenus.items() if t.startswith("homeassistant/select/") and p}
+
+
+def test_menus_ouverts_puis_fermes_a_lentre_deux(tmp_path):
+    h = Horloge(T - 3600)
+    app, bus = faire(tmp_path, h)
+    app.publier()
+    m = menus(bus)
+    assert len(m) == 4                                      # 2 matchs x 2 joueurs
+    conf = m["homeassistant/select/basket_live/prono_francis_1/config"]
+    assert conf["name"] == "jeu. 20:00 · Nanterre - Bourg-en-Bresse"
+    assert conf["options"] == [AUCUN, "Nanterre", "Bourg-en-Bresse"]
+    attrs = json.loads(bus.retenus["basket_live/prono/francis/1/attributs"])
+    assert attrs["joueur"] == "francis" and attrs["points_en_jeu"] == 2
+    # Entre-deux du premier match : ses deux menus disparaissent (configuration retenue vidée)
+    h.t = T + 60
+    app.publier()
+    assert bus.retenus["homeassistant/select/basket_live/prono_francis_1/config"] == ""
+    assert len(menus(bus)) == 2
+
+
+def test_saisie_verrou_points_et_classement(tmp_path):
+    h = Horloge(T - 3600)
+    app, bus = faire(tmp_path, h)
+    app.sur_commande("basket_live/prono/francis/1/set", "Nanterre")
+    app.sur_commande("basket_live/prono/ilona/1/set", "Bourg-en-Bresse")
+    app.sur_commande("basket_live/prono/francis/2/set", "Śląsk Wrocław")
+    app.sur_commande("basket_live/prono/ilona/2/set", "Śląsk Wrocław")
+    app.sur_commande("basket_live/prono/ilona/2/set", AUCUN)          # Ilona se ravise : pas de prono
+    app.sur_commande("basket_live/prono/ilona/1/set", "Inconnu")       # libellé invalide : ignoré
+    app.publier()
+    assert bus.retenus["basket_live/prono/francis/1/etat"] == "Nanterre"
+    assert bus.retenus["basket_live/prono/ilona/2/etat"] == AUCUN
+    # Rien n'est visible dans l'historique avant l'entre-deux
+    assert json.loads(bus.retenus["basket_live/pronostics/attributs"])["matchs"] == []
+
+    # Après l'entre-deux : saisie refusée, pronostics révélés
+    h.t = T + 60
+    app.traiter_ws({"type": "update", "data": {"eventId": 1, "status.code": 13}})
+    app.sur_commande("basket_live/prono/ilona/1/set", "Nanterre")
+    app.publier()
+    revele = json.loads(bus.retenus["basket_live/pronostics/attributs"])["matchs"]
+    assert revele[0]["pronos"] == {"francis": "Nanterre", "ilona": "Bourg-en-Bresse"}
+    assert revele[0]["resultats"] == {"francis": None, "ilona": None}
+
+    # Fins : Nanterre gagne (2 pts à Francis), Wrocław perd (0 pour Francis, Ilona n'avait pas joué)
+    m1, m2 = app.matchs[1], app.matchs[2]
+    m1.score_dom, m1.score_ext = 85, 80
+    app.finaliser(m1)
+    m2.code = 13
+    m2.score_dom, m2.score_ext = 70, 75
+    app.finaliser(m2)
+    app.publier()
+    histo = json.loads(bus.retenus["basket_live/pronostics/attributs"])
+    assert [x["id"] for x in histo["matchs"]] == [2, 1]
+    assert histo["matchs"][1]["resultats"] == {"francis": True, "ilona": False}
+    assert histo["matchs"][1]["points"] == {"francis": 2, "ilona": 0}
+    assert histo["matchs"][0]["pronos"]["ilona"] is None
+    classement = json.loads(bus.retenus["basket_live/classement/attributs"])
+    assert classement["joueurs"][0] == {"nom": "Francis", "points": 2, "bons": 1, "pronos": 2}
+    assert classement["joueurs"][1] == {"nom": "Ilona", "points": 0, "bons": 0, "pronos": 1}
+    assert bus.retenus["basket_live/classement/etat"] == "Francis"
+    assert bus.retenus["basket_live/pronostics/etat"] == "2"
+
+    # Persistance
+    app.sauver_etat()
+    app2 = App(config(tmp_path), FausseApi(), bus=FauxBus(), horloge=h)
+    app2.charger_etat()
+    assert len(app2.pronos.historique) == 2
+
+
+def test_saison():
+    assert saison(datetime(2026, 11, 5, tzinfo=TZ).timestamp(), TZ) == "2026-2027"
+    assert saison(datetime(2027, 6, 10, tzinfo=TZ).timestamp(), TZ) == "2026-2027"
+    assert saison(datetime(2027, 7, 1, 12, tzinfo=TZ).timestamp(), TZ) == "2027-2028"

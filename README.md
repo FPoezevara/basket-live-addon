@@ -54,6 +54,17 @@ Dans les événements, le chrono est extrapolé à l'instant de l'envoi ; dans l
 2. Installer « Basket Live », renseigner la clé API dans Configuration, démarrer.
 3. Vérifier dans le journal : `Calendrier du … : N matchs suivis` et `Connecté à MQTT`.
 
+## Concours de pronostics
+
+Pour chaque match à venir et chaque joueur (option `joueurs`), l'add-on publie un menu `select` (« jeu. 18:15 · Efes - Paris », options `—`, équipe à domicile, équipe à l'extérieur ; attributs `joueur`, `debut`, `points_en_jeu`). Le menu disparaît à l'entre-deux, ce qui fige le pronostic. À la fin confirmée : 2 points pour un bon pronostic sur un match de Nanterre, 1 point sinon.
+
+| Entité | État | Attributs |
+|---|---|---|
+| `sensor.basket_live_pronostics` | matchs terminés pronostiqués de la saison | `matchs` : en cours (pronostics révélés) puis terminés, 50 au plus |
+| `sensor.basket_live_classement` | joueur en tête, ou « Égalité » | `saison`, `joueurs` (`nom`, `points`, `bons`, `pronos`) |
+
+Saison du 1er juillet au 30 juin. Les pronostics de l'autre ne sont cachés que sur le tableau de bord : HA n'a pas de droits par entité.
+
 ## Côté Home Assistant
 
 `homeassistant/packages/basket.yaml` (préférences, lives, résultats, sélecteurs) et `homeassistant/dashboard-basket.yaml` (tableau de bord) sont la référence versionnée de ce qui est installé dans `/homeassistant`.

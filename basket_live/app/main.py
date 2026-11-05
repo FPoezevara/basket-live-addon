@@ -19,6 +19,7 @@ import aiohttp
 
 from . import VERSION, config
 from .api import ESSENTIEL, FOND, Api
+from .pronos import Pronos, ouvert, saison
 from .modele import (CODE_TERMINE, CODES_EN_COURS, Criteres, Match, actif, appliquer, categorie,
                      construire_match, date_locale, entier, finaliser, maj_statique, normaliser, vue)
 
@@ -60,6 +61,7 @@ class App:
         self.sale = True
         self.etat_modifie = False
         self.fichier_etat = cfg.dossier_donnees / "etat.json"
+        self.pronos = Pronos(cfg.joueurs)
 
     # --- utilitaires ---------------------------------------------------------------------
 
@@ -74,9 +76,22 @@ class App:
         maintenant = self.horloge()
         return any(actif(m, maintenant) for m in self.matchs.values())
 
-    def sur_commande(self, texte: str) -> None:
-        if texte.strip() == "rafraichir":
-            self.demande_rafraichir = True
+    def sur_commande(self, topic: str, texte: str) -> None:
+        from .bus import COMMANDE
+        if topic == COMMANDE:
+            if texte.strip() == "rafraichir":
+                self.demande_rafraichir = True
+            return
+        # basket_live/prono/<joueur>/<id>/set
+        morceaux = topic.split("/")
+        if len(morceaux) == 5 and morceaux[1] == "prono" and morceaux[4] == "set":
+            m = self.matchs.get(entier(morceaux[3]))
+            if m is not None and self.pronos.choisir(m, morceaux[2], texte.strip(), self.horloge()):
+                log.info("Pronostic de %s sur %s - %s : %s", morceaux[2], m.domicile, m.exterieur, texte.strip())
+                self.marquer()
+            else:
+                log.info("Pronostic refusé (%s, %s) : match inconnu ou déjà commencé", topic, texte)
+                self.sale = True                            # republie l'état réel du menu
 
     # --- persistance ---------------------------------------------------------------------
 
@@ -91,6 +106,7 @@ class App:
         self.matchs = {m.id: m for m in (Match.depuis_dict(d) for d in etat.get("matchs", []))}
         self.resultats = [Match.depuis_dict(d) for d in etat.get("resultats", [])]
         self.dernier_calendrier = etat.get("dernier_calendrier", {})
+        self.pronos.charger(etat.get("pronos", {}))
         api = etat.get("api", {})
         self.api.restaurer(api.get("jour", ""), api.get("compteur", 0))
         log.info("État restauré : %s matchs suivis, %s résultats", len(self.matchs), len(self.resultats))
@@ -102,6 +118,7 @@ class App:
             "matchs": [asdict(m) for m in self.matchs.values()],
             "resultats": [asdict(m) for m in self.resultats],
             "dernier_calendrier": self.dernier_calendrier,
+            "pronos": self.pronos.vers_dict(),
             "api": {"jour": self.api.jour, "compteur": self.api.compteur},
         }
         tmp = self.fichier_etat.with_suffix(".tmp")
@@ -117,6 +134,7 @@ class App:
                        if date_locale(m.debut_ts, self.tz) >= jour or actif(m, maintenant)}
         limite = maintenant - self.cfg.historique_jours * 86400
         self.resultats = [m for m in self.resultats if (m.termine_ts or 0) >= limite]
+        self.pronos.nettoyer(set(self.matchs))
         garder = {jour.isoformat(), (jour + timedelta(days=1)).isoformat()}
         self.dernier_calendrier = {j: t for j, t in self.dernier_calendrier.items() if j in garder}
         if len(self.matchs) != avant:
@@ -144,6 +162,9 @@ class App:
 
     def finaliser(self, m: Match) -> None:
         finaliser(m, self.horloge())
+        e = self.pronos.resultat(m, self.tz)
+        if e:
+            log.info("Pronostics de %s - %s : %s", m.domicile, m.exterieur, e["points"])
         self.resultats = [r for r in self.resultats if r.id != m.id]
         self.resultats.append(m)
         self.emettre("fin", m)
@@ -170,10 +191,32 @@ class App:
             self.bus.poser(topic_attributs(objet), json.dumps({"matchs": vues}, ensure_ascii=False))
         self.bus.poser(topic_etat("requetes_du_jour"), str(self.api.compteur))
         self.bus.poser(topic_etat("websocket"), "ON" if self.ws_connecte else "OFF")
+        self.publier_pronos(maintenant)
         if self.dernier_calendrier:
             dernier = max(self.dernier_calendrier.values())
             self.bus.poser(topic_etat("dernier_calendrier"), datetime.fromtimestamp(dernier, self.tz).isoformat())
         self.sale = False
+
+    def publier_pronos(self, maintenant: float) -> None:
+        from .bus import DISPO, topic_attributs, topic_etat
+        for topic, payload in self.pronos.messages(sorted(self.matchs.values(), key=lambda m: m.debut_ts),
+                                                   self.tz, maintenant, DISPO):
+            self.bus.poser(topic, payload)
+        courante = saison(maintenant, self.tz)
+        # Matchs commencés et pas encore finis : les deux pronostics deviennent visibles
+        en_cours = [self.pronos.entree(m, self.tz)
+                    for m in sorted(self.matchs.values(), key=lambda m: m.debut_ts, reverse=True)
+                    if m.id in self.pronos.choix and not m.termine and not ouvert(m, maintenant)]
+        passes = [h for h in reversed(self.pronos.historique) if h["saison"] == courante]
+        liste = (en_cours + passes)[:50]
+        self.bus.poser(topic_etat("pronostics"), str(len(passes)))
+        self.bus.poser(topic_attributs("pronostics"), json.dumps({"saison": courante, "matchs": liste}, ensure_ascii=False))
+        classement = self.pronos.classement(courante)
+        tete = classement[0] if classement else None
+        egalite = len(classement) > 1 and classement[0]["points"] == classement[1]["points"]
+        self.bus.poser(topic_etat("classement"), "Égalité" if egalite or not tete else tete["nom"])
+        self.bus.poser(topic_attributs("classement"), json.dumps({"saison": courante, "joueurs": classement},
+                                                                 ensure_ascii=False))
 
     # --- calendrier ----------------------------------------------------------------------
 

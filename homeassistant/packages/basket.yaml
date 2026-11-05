@@ -286,11 +286,23 @@ automation:
           - sensor.basket_live_matchs_a_venir
           - sensor.basket_live_lives_en_cours
         to: ~
+      # L'état et la liste arrivent par deux messages MQTT distincts : la liste peut suivre l'état.
+      # Les attributs des matchs à venir ne changent pas au fil des paniers, on peut les écouter.
+      - trigger: state
+        entity_id: sensor.basket_live_matchs_a_venir
+        attribute: matchs
       - trigger: homeassistant
         event: start
-      - trigger: time
-        at: "00:15:00"
+      # Filet de sécurité, sans coût : set_options sur une liste identique ne change rien
+      - trigger: time_pattern
+        minutes: /15
     actions:
+      # Au démarrage, laisser le temps aux messages MQTT retenus d'arriver
+      - if:
+          - condition: template
+            value_template: "{{ trigger.platform == 'homeassistant' }}"
+        then:
+          - delay: "00:00:30"
       - variables:
           options: >-
             {% set jours = ['lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.', 'dim.'] %}

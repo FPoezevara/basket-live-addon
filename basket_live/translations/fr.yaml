@@ -25,5 +25,8 @@ configuration:
   quota_jour:
     name: Quota de requêtes par jour
     description: Plafond de l'offre (100 en gratuit). Une réserve est gardée pour confirmer les fins de match.
+  joueurs:
+    name: Joueurs du concours de pronostics
+    description: Prénoms en minuscules ; ils doivent correspondre aux suffixes des entités HA (input_boolean.basket_<prénom>_…).
   log_level:
     name: Niveau de journal

@@ -22,6 +22,7 @@ RACINE = "basket_live"
 DISPO = f"{RACINE}/statut"
 EVENEMENT = f"{RACINE}/evenement"
 COMMANDE = f"{RACINE}/commande"
+PRONO_SET = f"{RACINE}/prono/+/+/set"
 STATUT_HA = "homeassistant/status"
 
 APPAREIL = {
@@ -45,6 +46,8 @@ ENTITES = [
                                              "entity_category": "diagnostic"}),
     ("binary_sensor", "websocket", False, {"name": "WebSocket", "device_class": "connectivity",
                                            "entity_category": "diagnostic"}),
+    ("sensor", "pronostics", True, {"name": "Pronostics", "icon": "mdi:crystal-ball"}),
+    ("sensor", "classement", True, {"name": "Classement", "icon": "mdi:podium"}),
     ("button", "rafraichir_le_calendrier", False, {"name": "Rafraîchir le calendrier", "icon": "mdi:refresh",
                                                    "command_topic": COMMANDE, "payload_press": "rafraichir"}),
 ]
@@ -80,7 +83,7 @@ def decouverte() -> list[tuple[str, str]]:
 
 class Bus:
     def __init__(self, host: str, port: int, user: str | None, password: str | None,
-                 sur_commande: Callable[[str], None]):
+                 sur_commande: Callable[[str, str], None]):
         self.host, self.port, self.user, self.password = host, port, user, password
         self.sur_commande = sur_commande
         self.retenus: dict[str, str] = {}
@@ -111,16 +114,19 @@ class Bus:
             if message.topic.matches(STATUT_HA) and texte == "online":
                 log.info("Home Assistant redémarré : republication")
                 await self._publier_tout(client)
-            elif message.topic.matches(COMMANDE):
-                self.sur_commande(texte)
+            elif message.topic.matches(COMMANDE) or message.topic.matches(PRONO_SET):
+                self.sur_commande(message.topic.value, texte)
 
     async def _vider(self, client: aiomqtt.Client) -> None:
         while self.evenements:
             await client.publish(EVENEMENT, self.evenements[0], qos=1, retain=False)
             self.evenements.popleft()
         for topic in list(self.a_publier):
-            await client.publish(topic, self.retenus[topic], qos=1, retain=True)
+            payload = self.retenus[topic]
+            await client.publish(topic, payload, qos=1, retain=True)
             self.a_publier.discard(topic)
+            if payload == "":
+                del self.retenus[topic]                 # retenu effacé chez le broker : inutile de le garder
 
     async def run(self) -> None:
         attente = 2
@@ -137,6 +143,7 @@ class Bus:
                     await client.publish(DISPO, "online", qos=1, retain=True)
                     await client.subscribe(COMMANDE, qos=1)
                     await client.subscribe(STATUT_HA, qos=1)
+                    await client.subscribe(PRONO_SET, qos=1)
                     await self._publier_tout(client)
                     reception = asyncio.create_task(self._recevoir(client))
                     try:
