@@ -1,7 +1,7 @@
 # Tableau de bord « Basket » (URL : dashboard-basket)
 # À coller dans : tableau de bord > crayon > ⋮ > Éditeur de configuration brute.
-# Remplacer ID_FRANCIS et ID_ILONA par les user_id (voir la procédure).
-# Carte HACS requise : auto-entities (menus de pronostics).
+# Visibilité par utilisateur : Francis c2af4c5a…, Ilona 7521abea… (user_id HA).
+# Ressource requise : /local/basket-a-venir-card.js (module), copie de www/basket-a-venir-card.js.
 title: Basket
 views:
   - title: Direct
@@ -35,57 +35,12 @@ views:
           - type: heading
             heading: Aujourd'hui et demain
             icon: mdi:calendar-clock
-          - type: markdown
-            content: |-
-              {% set jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'] %}
-              {% set eu = [138, 141, 9357, 2165] %}
-              {% set l = state_attr('sensor.basket_live_matchs_a_venir', 'matchs') or [] %}
-              {% if l | count == 0 %}*Aucun match prévu.*{% endif %}
-              {% set ns = namespace(jour='') %}
-              {% for m in l | sort(attribute='debut') %}
-              {% set d = as_datetime(m.debut) | as_local %}
-              {% set j = jours[d.weekday()] ~ ' ' ~ d.strftime('%d/%m') %}
-              {% if j != ns.jour %}{% set ns.jour = j %}
-
-              **{{ j }}**
-              {% endif %}
-              - {{ d.strftime('%H:%M') }} : {{ m.titre }} ({{ '🇪🇺' if m.tournoi_id in eu else '🇫🇷' }} {{ m.tournoi }}){% if m.code in [60, 70] %} · {{ m.statut }}{% endif %}
-              {% endfor %}
-          # Un menu par match à venir, pour le seul utilisateur connecté ; disparaît à l'entre-deux
-          - type: custom:auto-entities
-            visibility:
-              - condition: user
-                users:
-                  - ID_FRANCIS
-            card:
-              type: entities
-              title: Mes pronostics
-            filter:
-              include:
-                - domain: select
-                  attributes:
-                    joueur: francis
-            sort:
-              method: attribute
-              attribute: debut
-            show_empty: false
-          - type: custom:auto-entities
-            visibility:
-              - condition: user
-                users:
-                  - ID_ILONA
-            card:
-              type: entities
-              title: Mes pronostics
-            filter:
-              include:
-                - domain: select
-                  attributes:
-                    joueur: ilona
-            sort:
-              method: attribute
-              attribute: debut
-            show_empty: false
+          # Carte personnalisée (www/basket-a-venir-card.js) : matchs par jour et pronostic par bascule.
+          # Le joueur est déduit de l'utilisateur connecté ; les autres comptes voient la liste sans bascule.
+          - type: custom:basket-a-venir-card
+            joueurs:
+              c2af4c5a136e448ab37deaae63146536: francis
+              7521abea3321478f8c461ee465767fcb: ilona
           - type: heading
             heading: Résultats des 7 derniers jours
             icon: mdi:scoreboard
@@ -114,7 +69,7 @@ views:
             visibility:
               - condition: user
                 users:
-                  - ID_FRANCIS
+                  - c2af4c5a136e448ab37deaae63146536
             entities:
               - entity: input_select.basket_suivi_francis
               - entity: input_boolean.basket_francis_live_nanterre
@@ -125,7 +80,7 @@ views:
             visibility:
               - condition: user
                 users:
-                  - ID_ILONA
+                  - 7521abea3321478f8c461ee465767fcb
             entities:
               - entity: input_select.basket_suivi_ilona
               - entity: input_boolean.basket_ilona_live_nanterre
@@ -137,7 +92,7 @@ views:
             visibility:
               - condition: user
                 users:
-                  - ID_FRANCIS
+                  - c2af4c5a136e448ab37deaae63146536
             entities:
               - entity: binary_sensor.basket_live_websocket
               - entity: sensor.basket_live_requetes_du_jour
