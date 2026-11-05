@@ -10,6 +10,7 @@ ramenées à un dictionnaire plat à clés pointées par `normaliser` :
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field, fields
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
@@ -45,6 +46,23 @@ NOMS_TOURNOIS = {
     9357: "Basketball Champions League",
     2165: "FIBA Europe Cup",
 }
+
+NOMS_TOURNOIS_COURTS = {
+    156: "Élite",
+    1666: "Coupe de France",
+    405: "Leaders Cup",
+    138: "EuroLeague",
+    141: "EuroCup",
+    9357: "BCL",
+    2165: "Europe Cup",
+}
+
+# Noms d'équipes raccourcis pour les surfaces étroites (Live Activity) :
+# « SIG Strasbourg » → « Strasbourg », « Le Mans Sarthe Basket » → « Le Mans »
+PREFIXES_EQUIPE = re.compile(r"^(?:JL|SIG|SLUC|AS|BC|KK|CB|CSP|JDA|ESSM|SCBA)\s+")
+SUFFIXES_EQUIPE = re.compile(r"\s+(?:Sarthe\s+Basket|Basket(?:ball)?(?:\s+Club)?|Sarthe)$")
+# Exceptions appliquées au résultat de la règle
+NOMS_COURTS = {"Bourg": "Bourg-en-Bresse"}
 
 # Un match terminé plus de 4 h après l'entre-deux est signalé « tardif » (fin rattrapée par le calendrier)
 DELAI_TARDIF = 4 * 3600
@@ -161,6 +179,11 @@ def nom_equipe(eq: dict) -> str:
     return eq.get("shortName") or eq.get("name") or "?"
 
 
+def nom_court(nom: str) -> str:
+    court = SUFFIXES_EQUIPE.sub("", PREFIXES_EQUIPE.sub("", nom)).strip() or nom
+    return NOMS_COURTS.get(court, court)
+
+
 def code_equipe(eq: dict) -> str | None:
     code = eq.get("nameCode")
     if code:
@@ -259,6 +282,16 @@ def temps_restant(m: Match, maintenant: float, extrapoler: bool = True) -> int |
     if restant < 0 or restant > duree:
         return None  # temps joué incohérent avec le statut : on n'affiche rien plutôt que faux
     return int(restant)
+
+
+def duree_match(m: Match) -> int:
+    """Durée totale de jeu (s), prolongations comprises dès qu'elles existent."""
+    base = 4 * m.duree_quart
+    joue = m.temps_joue or 0
+    if m.code == CODE_PROLONGATION or m.prolongation_dom is not None or joue > base:
+        n = max(1, math.ceil((joue - base) / m.duree_prolongation)) if joue > base else 1
+        return base + n * m.duree_prolongation
+    return base
 
 
 def format_chrono(s: int | None) -> str | None:
@@ -388,8 +421,24 @@ def statut_affiche(m: Match) -> str:
     return LIBELLES.get(m.code, m.description or str(m.code))
 
 
+def statut_court(m: Match) -> str:
+    if m.termine:
+        return "Terminé a.p." if m.prolongation_dom is not None else "Terminé"
+    if m.code == CODE_TERMINE:
+        return "Fin"
+    if m.code == CODE_A_VENIR:
+        return "À venir"
+    return LIBELLES_COURTS.get(m.code, statut_affiche(m))
+
+
 def vue(m: Match, tz: ZoneInfo, maintenant: float, extrapoler: bool = True) -> dict:
     restant = temps_restant(m, maintenant, extrapoler)
+    joue = temps_joue_actuel(m, maintenant, extrapoler)
+    total = duree_match(m)
+    if m.termine or m.code == CODE_TERMINE:
+        joue = total
+    elif joue is None and m.code in CODES_QUARTS:
+        joue = (m.code - 13) * m.duree_quart       # pas encore de chrono : début du quart-temps en cours
     a_score = m.score_dom is not None and m.score_ext is not None
     score = f"{m.score_dom} - {m.score_ext}" if a_score else None
     etiquette = LIBELLES_COURTS.get(m.code)
@@ -403,9 +452,12 @@ def vue(m: Match, tz: ZoneInfo, maintenant: float, extrapoler: bool = True) -> d
         "id": m.id,
         "categorie": m.categorie,
         "tournoi": m.tournoi,
+        "tournoi_court": NOMS_TOURNOIS_COURTS.get(m.tournoi_id, m.tournoi),
         "tournoi_id": m.tournoi_id,
         "domicile": m.domicile,
         "exterieur": m.exterieur,
+        "domicile_court": nom_court(m.domicile),
+        "exterieur_court": nom_court(m.exterieur),
         "domicile_id": m.domicile_id,
         "exterieur_id": m.exterieur_id,
         "domicile_code": m.domicile_code,
@@ -414,6 +466,7 @@ def vue(m: Match, tz: ZoneInfo, maintenant: float, extrapoler: bool = True) -> d
         "debut": datetime.fromtimestamp(m.debut_ts, tz).isoformat(),
         "code": m.code,
         "statut": statut_affiche(m),
+        "statut_court": statut_court(m),
         "en_cours": m.code in CODES_EN_COURS and not m.termine,
         "fin_provisoire": m.code == CODE_TERMINE and not m.termine,
         "termine": m.termine,
@@ -430,5 +483,9 @@ def vue(m: Match, tz: ZoneInfo, maintenant: float, extrapoler: bool = True) -> d
         "horloge": m.horloge,
         "temps_restant": restant,
         "chrono": format_chrono(restant),
+        "temps_joue": joue,
+        "duree_match": total,
+        # Avancement sur le temps réglementaire : 25 % par quart-temps, 100 % au buzzer du QT4 et en prolongation
+        "progression": None if joue is None else min(100, round(100 * joue / (4 * m.duree_quart))),
         "termine_le": datetime.fromtimestamp(m.termine_ts, tz).isoformat() if m.termine_ts else None,
     }

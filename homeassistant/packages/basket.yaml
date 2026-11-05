@@ -1,0 +1,379 @@
+# =====================================================================
+# Basket Live : préférences, lives et résultats sur les téléphones
+# Emplacement : /homeassistant/packages/basket.yaml
+# Dépend de l'add-on basket_live (capteurs sensor.basket_live_*,
+# événements MQTT sur basket_live/evenement).
+#
+# Par personne :
+#   - 4 interrupteurs : live Nanterre, résultat Nanterre,
+#     résultats Élite, résultats Europe ;
+#   - 1 sélecteur de match à suivre en live (interface) doublé d'un
+#     input_text qui garde l'identifiant (état) : le sélecteur est
+#     réinitialisé quand la liste des matchs change, pas l'identifiant.
+# Règle « le live suffit » : qui suit un match en live ne reçoit pas
+# en plus la notification de résultat.
+# =====================================================================
+
+input_boolean:
+  basket_francis_live_nanterre:
+    name: Live des matchs de Nanterre
+    icon: mdi:basketball
+  basket_francis_resultat_nanterre:
+    name: Résultat des matchs de Nanterre
+    icon: mdi:scoreboard
+  basket_francis_resultats_elite:
+    name: Résultats de la Betclic Élite
+    icon: mdi:trophy
+  basket_francis_resultats_europe:
+    name: Résultats européens des clubs français
+    icon: mdi:earth
+  basket_ilona_live_nanterre:
+    name: Live des matchs de Nanterre
+    icon: mdi:basketball
+  basket_ilona_resultat_nanterre:
+    name: Résultat des matchs de Nanterre
+    icon: mdi:scoreboard
+  basket_ilona_resultats_elite:
+    name: Résultats de la Betclic Élite
+    icon: mdi:trophy
+  basket_ilona_resultats_europe:
+    name: Résultats européens des clubs français
+    icon: mdi:earth
+
+input_select:
+  basket_suivi_francis:
+    name: Match suivi en live
+    icon: mdi:eye
+    options:
+      - Aucun
+  basket_suivi_ilona:
+    name: Match suivi en live
+    icon: mdi:eye
+    options:
+      - Aucun
+
+input_text:
+  basket_suivi_francis_id:
+    name: Francis, identifiant du match suivi
+    max: 20
+  basket_suivi_ilona_id:
+    name: Ilona, identifiant du match suivi
+    max: 20
+
+script:
+  # Live : Live Activity sur l'iPhone de Francis, notification persistante
+  # mise à jour sur place chez Ilona (Android 15, pas de Live Update).
+  basket_live_pousser:
+    alias: Basket - pousser un live
+    mode: parallel
+    max: 20
+    fields:
+      personne:
+        description: francis ou ilona
+      match:
+        description: Objet match publié par l'add-on
+      final:
+        description: true pour la fin confirmée (notification libérée chez Ilona)
+    sequence:
+      # Mise en page : équipes en titre, score seul à droite (gros caractères, Dynamic Island),
+      # une seule ligne d'état en dessous, barre de progression = avancement du match.
+      # Les « | default » couvrent un add-on antérieur à la 0.1.1 (sans noms courts ni temps joué).
+      - variables:
+          dom: "{{ match.domicile_court | default(match.domicile) }}"
+          ext: "{{ match.exterieur_court | default(match.exterieur) }}"
+          a_score: "{{ match.score_dom is not none and match.score_ext is not none }}"
+          score: "{{ match.score_dom ~ ' - ' ~ match.score_ext if a_score else '' }}"
+          ligne: >-
+            {{ match.statut_court | default(match.statut) }}{% if match.chrono and not final %} · {{ match.chrono }}{% endif %} · {{ match.tournoi_court | default(match.tournoi) }}
+          # Avancement global sur 100 : 25 % par quart-temps (0.1.2), sinon calculé sur 40 min
+          avance: >-
+            {% if match.progression is defined and match.progression is not none %}{{ match.progression }}
+            {% else %}{{ [100, ((match.temps_joue | default(0, true) | int(0)) * 100 / 2400) | round(0) | int] | min }}{% endif %}
+          etiquette: "basket_{{ match.id }}"
+      - choose:
+          - conditions: "{{ personne == 'francis' }}"
+            sequence:
+              - action: notify.mobile_app_iphone_de_francis_2
+                data:
+                  # notification_icon n'est pas affiché sur l'écran verrouillé : le ballon va dans le titre
+                  title: "🏀 {{ dom }} - {{ ext }}"
+                  message: "{{ ligne }}"
+                  data:
+                    tag: "{{ etiquette }}"
+                    live_update: true
+                    critical_text: "{{ score if a_score else match.statut_court | default(match.statut) }}"
+                    progress: "{{ avance }}"
+                    progress_max: 100
+                    notification_icon: mdi:basketball
+                    notification_icon_color: "#F26B1D"
+                    url: /dashboard-basket/direct
+          - conditions: "{{ personne == 'ilona' }}"
+            sequence:
+              - action: notify.mobile_app_sm_g998u1
+                data:
+                  # Android a toute la largeur : le score tient dans le titre
+                  title: "🏀 {{ dom ~ '  ' ~ score ~ '  ' ~ ext if a_score else dom ~ ' - ' ~ ext }}"
+                  message: "{{ ligne }}"
+                  data:
+                    tag: "{{ etiquette }}"
+                    progress: "{{ avance }}"
+                    progress_max: 100
+                    # Canal créé au premier envoi, sans son ; alert_once : pas de vibration aux mises à jour
+                    channel: Basket live
+                    importance: low
+                    alert_once: true
+                    sticky: true
+                    persistent: "{{ not final }}"
+                    notification_icon: mdi:basketball
+                    clickAction: /dashboard-basket/direct
+
+  basket_live_resultat:
+    alias: Basket - notifier un résultat
+    mode: parallel
+    max: 20
+    fields:
+      personne:
+        description: francis ou ilona
+      match:
+        description: Objet match publié par l'add-on
+    sequence:
+      - variables:
+          corps: >-
+            {{ match.domicile }} {{ match.score_dom }} - {{ match.score_ext }} {{ match.exterieur }}{{ ' (a.p.)' if match.prolongation_dom is not none else '' }}
+          etiquette: "basket_res_{{ match.id }}"
+      - choose:
+          - conditions: "{{ personne == 'francis' }}"
+            sequence:
+              - action: notify.mobile_app_iphone_de_francis_2
+                data:
+                  title: "{{ match.tournoi }}"
+                  message: "{{ corps }}"
+                  data:
+                    tag: "{{ etiquette }}"
+                    group: basket-resultats
+                    url: /dashboard-basket/direct
+                    push:
+                      # Pas de son ni d'allumage d'écran : rangée dans le centre de notifications
+                      interruption-level: passive
+          - conditions: "{{ personne == 'ilona' }}"
+            sequence:
+              - action: notify.mobile_app_sm_g998u1
+                data:
+                  title: "{{ match.tournoi }}"
+                  message: "{{ corps }}"
+                  data:
+                    tag: "{{ etiquette }}"
+                    group: basket-resultats
+                    channel: Basket résultats
+                    importance: low
+                    clickAction: /dashboard-basket/direct
+
+  basket_live_clore:
+    alias: Basket - clore un live
+    mode: parallel
+    max: 20
+    fields:
+      personne:
+        description: francis ou ilona
+      match_id:
+        description: Identifiant du match
+    sequence:
+      - action: "{{ 'notify.mobile_app_iphone_de_francis_2' if personne == 'francis' else 'notify.mobile_app_sm_g998u1' }}"
+        data:
+          message: clear_notification
+          data:
+            tag: "basket_{{ match_id }}"
+
+automation:
+  - id: basket_live_evenements
+    alias: Basket - lives et résultats
+    description: Relaie les événements de l'add-on selon les préférences de chacun
+    mode: queued
+    max: 50
+    triggers:
+      - trigger: mqtt
+        topic: basket_live/evenement
+    conditions:
+      - condition: template
+        value_template: >-
+          {{ trigger.payload_json is defined
+             and trigger.payload_json.type in ['debut', 'maj', 'periode', 'fin_provisoire', 'reprise', 'fin'] }}
+    actions:
+      - variables:
+          type_evt: "{{ trigger.payload_json.type }}"
+          match: "{{ trigger.payload_json.match }}"
+          final: "{{ trigger.payload_json.type == 'fin' }}"
+      - repeat:
+          for_each:
+            - francis
+            - ilona
+          sequence:
+            - variables:
+                p: "{{ repeat.item }}"
+                # Comparaison en entiers : le rendu natif transforme les identifiants en nombres
+                suit_live: >-
+                  {{ (match.categorie == 'nanterre' and is_state('input_boolean.basket_' ~ repeat.item ~ '_live_nanterre', 'on'))
+                     or (states('input_text.basket_suivi_' ~ repeat.item ~ '_id') | int(0)) == match.id }}
+                veut_resultat: >-
+                  {% set cle = {'nanterre': 'resultat_nanterre', 'elite': 'resultats_elite',
+                                'europe': 'resultats_europe'}.get(match.categorie) %}
+                  {{ cle is not none and is_state('input_boolean.basket_' ~ repeat.item ~ '_' ~ cle, 'on') }}
+            - choose:
+                - conditions: "{{ suit_live }}"
+                  sequence:
+                    - action: script.basket_live_pousser
+                      data:
+                        personne: "{{ p }}"
+                        match: "{{ match }}"
+                        final: "{{ final }}"
+                # « Tardif » : fin rattrapée longtemps après coup, pas de notification
+                - conditions: "{{ final and veut_resultat and not match.tardif }}"
+                  sequence:
+                    - action: script.basket_live_resultat
+                      data:
+                        personne: "{{ p }}"
+                        match: "{{ match }}"
+            - if:
+                - condition: template
+                  value_template: "{{ final and (states('input_text.basket_suivi_' ~ p ~ '_id') | int(0)) == match.id }}"
+              then:
+                - action: input_text.set_value
+                  target:
+                    entity_id: "input_text.basket_suivi_{{ p }}_id"
+                  data:
+                    value: ""
+
+  - id: basket_live_clore_apres_fin
+    alias: Basket - clore les lives 30 min après la fin
+    description: Retire la Live Activity et la notification d'Ilona une fois le score final lu
+    mode: parallel
+    max: 20
+    triggers:
+      - trigger: mqtt
+        topic: basket_live/evenement
+    conditions:
+      - condition: template
+        value_template: "{{ trigger.payload_json is defined and trigger.payload_json.type == 'fin' }}"
+    actions:
+      - delay: "00:30:00"
+      - repeat:
+          for_each:
+            - francis
+            - ilona
+          sequence:
+            - action: script.basket_live_clore
+              continue_on_error: true
+              data:
+                personne: "{{ repeat.item }}"
+                match_id: "{{ trigger.payload_json.match.id }}"
+
+  - id: basket_live_options
+    alias: Basket - liste des matchs à suivre
+    description: Recalcule les sélecteurs et y remet le match suivi par chacun
+    mode: queued
+    max: 3
+    triggers:
+      # to: null = changement d'état seulement, pas à chaque changement d'attribut (score)
+      - trigger: state
+        entity_id:
+          - sensor.basket_live_matchs_a_venir
+          - sensor.basket_live_lives_en_cours
+        to: ~
+      - trigger: homeassistant
+        event: start
+      - trigger: time
+        at: "00:15:00"
+    actions:
+      - variables:
+          options: >-
+            {% set jours = ['lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.', 'dim.'] %}
+            {% set liste = (state_attr('sensor.basket_live_lives_en_cours', 'matchs') or [])
+                         + (state_attr('sensor.basket_live_matchs_a_venir', 'matchs') or []) %}
+            {% set ns = namespace(l=[]) %}
+            {% for m in liste | sort(attribute='debut') %}
+              {% set d = as_datetime(m.debut) | as_local %}
+              {% set ns.l = ns.l + [jours[d.weekday()] ~ ' ' ~ d.strftime('%H:%M') ~ ' · ' ~ m.titre
+                                    ~ ' · ' ~ m.tournoi ~ ' · #' ~ m.id] %}
+            {% endfor %}
+            {{ ['Aucun'] + ns.l }}
+      - repeat:
+          for_each:
+            - francis
+            - ilona
+          sequence:
+            - action: input_select.set_options
+              target:
+                entity_id: "input_select.basket_suivi_{{ repeat.item }}"
+              data:
+                options: "{{ options }}"
+            - variables:
+                suivi: "{{ states('input_text.basket_suivi_' ~ repeat.item ~ '_id') | int(0) }}"
+                choix: >-
+                  {% set trouve = options | select('search', '#' ~ suivi ~ '$') | list if suivi > 0 else [] %}
+                  {{ trouve[0] if trouve else 'Aucun' }}
+            - action: input_select.select_option
+              target:
+                entity_id: "input_select.basket_suivi_{{ repeat.item }}"
+              data:
+                option: "{{ choix }}"
+
+  - id: basket_live_choix
+    alias: Basket - choix du match suivi
+    description: Mémorise le choix fait dans l'interface et démarre le live tout de suite si le match est en cours
+    mode: queued
+    max: 10
+    triggers:
+      - trigger: state
+        entity_id:
+          - input_select.basket_suivi_francis
+          - input_select.basket_suivi_ilona
+        to: ~
+    conditions:
+      # Seulement un choix fait par une personne, pas les remises à jour de la liste
+      - condition: template
+        value_template: "{{ trigger.to_state.context.user_id is not none }}"
+    actions:
+      - variables:
+          p: "{{ trigger.entity_id.split('_')[-1] }}"
+          nouveau: >-
+            {% set t = trigger.to_state.state %}
+            {{ (t | regex_findall_index('#([0-9]+)$')) | int(0) if '#' in t else 0 }}
+          ancien: "{{ states('input_text.basket_suivi_' ~ p ~ '_id') | int(0) }}"
+          lives: "{{ state_attr('sensor.basket_live_lives_en_cours', 'matchs') or [] }}"
+      - action: input_text.set_value
+        target:
+          entity_id: "input_text.basket_suivi_{{ p }}_id"
+        data:
+          value: "{{ nouveau if nouveau > 0 else '' }}"
+      # Abandon d'un match : on retire son live, sauf s'il reste couvert par « live Nanterre »
+      - if:
+          - condition: template
+            value_template: >-
+              {% set m = lives | selectattr('id', 'eq', ancien) | first | default(none) %}
+              {{ ancien > 0 and ancien != nouveau
+                 and not (m is not none and m.categorie == 'nanterre'
+                          and is_state('input_boolean.basket_' ~ p ~ '_live_nanterre', 'on')) }}
+        then:
+          - action: script.basket_live_clore
+            data:
+              personne: "{{ p }}"
+              match_id: "{{ ancien }}"
+      - variables:
+          en_cours: "{{ lives | selectattr('id', 'eq', nouveau) | first | default(none) }}"
+      - if:
+          - condition: template
+            value_template: "{{ en_cours is not none }}"
+        then:
+          - action: script.basket_live_pousser
+            data:
+              personne: "{{ p }}"
+              match: "{{ en_cours }}"
+              final: false
+
+# Les attributs des lives changent à chaque panier : on ne les garde pas dans le recorder.
+# Si configuration.yaml contient déjà un bloc « recorder: », supprimer ce bloc-ci et ajouter
+# l'entité sous recorder > exclude > entities de configuration.yaml (deux blocs = erreur).
+recorder:
+  exclude:
+    entities:
+      - sensor.basket_live_lives_en_cours

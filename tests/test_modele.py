@@ -100,3 +100,31 @@ def test_vue():
     assert v["statut"] == "4e quart-temps"
     assert v["tournoi"] == "Betclic Élite"
     assert v["debut"].endswith("+01:00")
+
+
+def test_noms_courts_et_progression():
+    from app.modele import nom_court
+    assert nom_court("JL Bourg Basket") == "Bourg-en-Bresse"
+    assert nom_court("SIG Strasbourg") == "Strasbourg"
+    assert nom_court("Le Mans Sarthe Basket") == "Le Mans"
+    assert nom_court("SLUC Nancy Basket") == "Nancy"
+    assert nom_court("Paris Basketball") == "Paris"
+    assert nom_court("AS Monaco") == "Monaco"
+    assert nom_court("Nanterre 92") == "Nanterre 92"
+    assert nom_court("Śląsk Wrocław") == "Śląsk Wrocław"
+    m = match_elite()
+    appliquer(m, {"status.code": 15, "homeScore.current": 45, "awayScore.current": 42}, T0)
+    v = vue(m, TZ, T0)
+    assert (v["temps_joue"], v["duree_match"], v["statut_court"], v["tournoi_court"]) == (1200, 2400, "QT3", "Élite")
+    appliquer(m, {"status.code": 17, "time.played": 2550}, T0)
+    assert vue(m, TZ, T0, extrapoler=False)["duree_match"] == 2700
+
+
+def test_progression_reglementaire():
+    m = match_elite()
+    for code, joue, attendu in ((13, 0, 0), (13, 300, 12), (14, 600, 25), (30, 1200, 50), (16, 2400, 100), (17, 2550, 100)):
+        appliquer(m, {"status.code": code, "time.played": joue}, T0)
+        assert vue(m, TZ, T0, extrapoler=False)["progression"] == attendu, (code, joue)
+    m2 = match_elite()
+    appliquer(m2, {"status.code": 15}, T0)                  # pas encore de chrono : début du QT3
+    assert vue(m2, TZ, T0)["progression"] == 50

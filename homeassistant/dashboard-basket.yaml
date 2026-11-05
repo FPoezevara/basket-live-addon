@@ -1,0 +1,94 @@
+# Tableau de bord « Basket » (URL : dashboard-basket)
+# À coller dans : tableau de bord > crayon > ⋮ > Éditeur de configuration brute.
+# Remplacer ID_FRANCIS et ID_ILONA par les user_id (voir la procédure).
+title: Basket
+views:
+  - title: Direct
+    path: direct
+    icon: mdi:basketball
+    type: sections
+    max_columns: 3
+    sections:
+      - type: grid
+        cards:
+          - type: heading
+            heading: En direct
+            icon: mdi:broadcast
+          - type: markdown
+            content: |-
+              {% set l = state_attr('sensor.basket_live_lives_en_cours', 'matchs') or [] %}
+              {% if l | count == 0 %}*Aucun match en cours.*{% endif %}
+              {% for m in l %}
+              **{{ m.tournoi }}** · {{ m.statut }}{% if m.chrono %} · {{ m.chrono }}{% endif %}
+
+              {% set ot = m.prolongation_dom is not none %}
+              | | 1 | 2 | 3 | 4 |{% if ot %} P |{% endif %} **Total** |
+              |:--|--:|--:|--:|--:|{% if ot %}--:|{% endif %}--:|
+              | {{ m.domicile }} |{% for q in m.quarts_dom %} {{ q if q is not none else '·' }} |{% endfor %}{% if ot %} {{ m.prolongation_dom }} |{% endif %} **{{ m.score_dom if m.score_dom is not none else '·' }}** |
+              | {{ m.exterieur }} |{% for q in m.quarts_ext %} {{ q if q is not none else '·' }} |{% endfor %}{% if ot %} {{ m.prolongation_ext }} |{% endif %} **{{ m.score_ext if m.score_ext is not none else '·' }}** |
+
+              {% endfor %}
+      - type: grid
+        cards:
+          - type: heading
+            heading: Aujourd'hui et demain
+            icon: mdi:calendar-clock
+          - type: markdown
+            content: |-
+              {% set jours = ['lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.', 'dim.'] %}
+              {% set l = state_attr('sensor.basket_live_matchs_a_venir', 'matchs') or [] %}
+              {% if l | count == 0 %}*Aucun match prévu.*{% endif %}
+              {% for m in l %}
+              {% set d = as_datetime(m.debut) | as_local %}
+              - **{{ jours[d.weekday()] }} {{ d.strftime('%H:%M') }}** · {{ m.titre }} · *{{ m.tournoi }}*{% if m.code in [60, 70] %} · {{ m.statut }}{% endif %}
+              {% endfor %}
+          - type: heading
+            heading: Résultats des 7 derniers jours
+            icon: mdi:scoreboard
+          - type: markdown
+            content: |-
+              {% set jours = ['lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.', 'dim.'] %}
+              {% set l = state_attr('sensor.basket_live_resultats', 'matchs') or [] %}
+              {% if l | count == 0 %}*Aucun résultat.*{% endif %}
+              {% for m in l %}
+              {% set d = as_datetime(m.debut) | as_local %}
+              - {{ jours[d.weekday()] }} {{ d.day }}/{{ d.month }} · {{ m.domicile }} **{{ m.score_dom }} - {{ m.score_ext }}** {{ m.exterieur }}{{ ' a.p.' if m.prolongation_dom is not none else '' }} · *{{ m.tournoi }}*
+              {% endfor %}
+      - type: grid
+        cards:
+          - type: heading
+            heading: Mes notifications
+            icon: mdi:bell-cog
+          - type: entities
+            visibility:
+              - condition: user
+                users:
+                  - ID_FRANCIS
+            entities:
+              - entity: input_select.basket_suivi_francis
+              - entity: input_boolean.basket_francis_live_nanterre
+              - entity: input_boolean.basket_francis_resultat_nanterre
+              - entity: input_boolean.basket_francis_resultats_elite
+              - entity: input_boolean.basket_francis_resultats_europe
+          - type: entities
+            visibility:
+              - condition: user
+                users:
+                  - ID_ILONA
+            entities:
+              - entity: input_select.basket_suivi_ilona
+              - entity: input_boolean.basket_ilona_live_nanterre
+              - entity: input_boolean.basket_ilona_resultat_nanterre
+              - entity: input_boolean.basket_ilona_resultats_elite
+              - entity: input_boolean.basket_ilona_resultats_europe
+          - type: entities
+            title: État de la source
+            visibility:
+              - condition: user
+                users:
+                  - ID_FRANCIS
+            entities:
+              - entity: binary_sensor.basket_live_websocket
+              - entity: sensor.basket_live_requetes_du_jour
+              - entity: sensor.basket_live_dernier_calendrier
+              - entity: button.basket_live_rafraichir_le_calendrier
