@@ -1,5 +1,12 @@
 # Journal des versions
 
+## 0.5.1
+
+- Commande MQTT `tester_archive_nanterre` pour tester un seul match historique terminé de Nanterre, y compris un jour de match.
+- Réutilisation prioritaire du dernier résultat local ; sinon une seule page Nanterre et sélection d’une seule rencontre de la saison. Coût maximal de trois requêtes, plafond total de 65/100 conservé.
+- Collecte uniquement des ressources en attente, progression persistante et absence de notifications ou de pronostics rétroactifs.
+- Aucun changement des fichiers Home Assistant.
+
 ## 0.5.0
 
 - Nouvel onglet Historique : résultats de toute la saison courante, distincts des sept derniers jours, avec filtre Nanterre et regroupement par mois.

@@ -115,6 +115,9 @@ class App:
         if topic == COMMANDE:
             if texte.strip() == "rafraichir":
                 self.demande_rafraichir = True
+            elif texte.strip() == "tester_archive_nanterre":
+                self.archives.demande_test = True
+                log.info("Test archive Nanterre demandé par MQTT")
             return
         morceaux = topic.split("/")
         if len(morceaux) == 5 and morceaux[:2] == ["basket_live", "suivi"] and morceaux[4] == "set":

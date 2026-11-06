@@ -233,3 +233,66 @@ def test_detection_saison_et_protection_du_score_suivi(tmp_path):
     ancien.score_dom=37
     assert not app.archives.ajouter(ancien,historique=True,maintenant=h.t,source='import')
     assert app.archives.resultats[1].score_dom==80
+
+
+def test_commande_test_un_seul_match_trois_requetes_sans_jour_libre(tmp_path):
+    from app.bus import COMMANDE
+    app, bus, api, h = faire(tmp_path)
+    api.reponses[('equipe', NANTERRE, 0)] = {'events': [ev(11, debut=T-86400), ev(12, debut=T-172800), ev(13, nanterre=False)]}
+    app.sur_commande(COMMANDE, 'tester_archive_nanterre')
+    assert traiter(app, api, h, False)
+    assert set(app.archives.resultats) == {11}
+    assert app.archives.test_match == 11
+    assert traiter(app, api, h, False)
+    assert traiter(app, api, h, False)
+    assert traiter(app, api, h, False)
+    assert app.archives.test_match is None
+    assert api.archive_appels == [('equipe', NANTERRE, 0), ('statistics', 11), ('lineups', 11)]
+    assert not bus.evenements
+    app.sur_commande(COMMANDE, 'tester_archive_nanterre')
+    traiter(app, api, h, False)
+    traiter(app, api, h, False)
+    assert len(api.archive_appels) == 3
+
+
+def test_commande_test_refuse_si_marge_insuffisante_et_ne_pagine_pas(tmp_path):
+    app, _, api, h = faire(tmp_path)
+    api.compteur = 63
+    app.archives.demande_test = True
+    traiter(app, api, h, False)
+    assert not api.archive_appels
+    assert not app.archives.demande_test
+    api.compteur = 0
+    api.reponses[('equipe', NANTERRE, 0)] = {'events': [], 'hasNextPage': True}
+    app.archives.demande_test = True
+    traiter(app, api, h, False)
+    assert api.archive_appels == [('equipe', NANTERRE, 0)]
+    assert app.archives.test_match is None
+
+
+def test_commande_test_reprise_cache_et_requetes_manquantes_seulement(tmp_path):
+    app, _, api, h = faire(tmp_path)
+    app.archives.ajouter(match(id=10), historique=True, maintenant=h.t)
+    app.archives.demande_test = True
+    traiter(app, api, h, False)
+    traiter(app, api, h, False)
+    assert api.archive_appels == [('statistics', 10)]
+    api2 = ApiArchives()
+    autre, _ = faire_app(tmp_path, api2, h)
+    assert autre.archives.test_match == 10
+    traiter(autre, api2, h, False)
+    traiter(autre, api2, h, False)
+    assert api2.archive_appels == [('lineups', 10)]
+    assert autre.archives.test_match is None
+
+
+def test_commande_test_filtre_matchs_non_eligibles_et_double_commande(tmp_path):
+    app, _, api, h = faire(tmp_path)
+    api.reponses[('equipe', NANTERRE, 0)] = {'events': [ev(1, nanterre=False), ev(2, code=15), ev(3, debut=T+86400), ev(4, debut=T-400*86400), ev(5, debut=T-86400)]}
+    app.archives.demande_test = True
+    traiter(app, api, h, False)
+    assert set(app.archives.resultats) == {5}
+    app.archives.demande_test = True
+    traiter(app, api, h, False)
+    assert api.archive_appels == [('equipe', NANTERRE, 0)]
+    assert app.archives.test_match == 5

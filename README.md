@@ -81,6 +81,25 @@ La réservation de chaque collecte est persistée avant l’appel. Une erreur ou
 
 Installation détaillée : [Historique 0.5.0](homeassistant/INSTALLATION-HISTORIQUE.md). Ajouter la ressource JavaScript **module** `/local/basket-historique-card.js?v=1.0.0`, puis l’onglet prévu dans le dashboard. Les gros attributs des archives sont exclus du recorder par le package fourni ; les fichiers de l’add-on restent leur stockage durable.
 
+### Tester un seul match historique
+
+À partir de 0.5.1, publier `tester_archive_nanterre` sur `basket_live/commande`, sans rétention, sélectionne le match terminé de Nanterre le plus récent déjà archivé. Si aucun n’existe, une seule page de résultats Nanterre est demandée et seul son match terminé le plus récent de la saison est ajouté. Le test collecte uniquement ses ressources encore en attente, même un jour de match, à raison d’un appel par minute. Il ne déclenche aucune notification ni modification de pronostics.
+
+Coût maximal de la commande : **3 requêtes** (une page et deux ressources), ou 0 à 2 si le match est déjà archivé. Le test exige que ce coût maximal tienne dans le plafond de 65 requêtes totales sur 100 ; il ne réessaie pas les ressources déjà enregistrées, indisponibles ou interrompues. Le match sélectionné et sa progression survivent à un redémarrage. Les imports automatiques existants conservent leur propre calendrier.
+
+Dans Outils de développement → Actions, exécuter :
+
+```yaml
+action: mqtt.publish
+data:
+  topic: basket_live/commande
+  payload: tester_archive_nanterre
+  qos: 1
+  retain: false
+```
+
+Consulter le journal `Test archive Nanterre sélectionné`, puis les deux lignes `Archive Nanterre <id> : statistics/lineups enregistre`. Attendre environ deux à quatre minutes et ouvrir la rencontre dans l’onglet Historique. Un double envoi réutilise le cache ; il ne recharge pas les statistiques.
+
 ## Concours de pronostics
 
 Pour chaque match à venir et chaque joueur (option `joueurs`), l'add-on publie un menu `select` (« jeu. 18:15 · Efes - Paris », options `—`, équipe à domicile, équipe à l'extérieur ; attributs `joueur`, `debut`, `points_en_jeu`). Le menu disparaît à l'entre-deux, ce qui fige le pronostic. À la fin confirmée, un bon pronostic rapporte 3 points pour Nanterre en Betclic Élite, 2 pour Nanterre dans une autre compétition ou pour un match d'Élite sans Nanterre, 1 pour les autres.

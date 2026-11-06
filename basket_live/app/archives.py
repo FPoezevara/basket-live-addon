@@ -104,8 +104,11 @@ class Archives:
         self.jobs += [{'type': 'saisons', 'id': tid, 'termine': False}
                       for tid in sorted(self.criteres.elite | self.criteres.europe)]
         self.erreur = ''
+        self.demande_test = False
+        self.test_match = None
         ancien = lire(self.index, {})
         if ancien:
+            self.test_match = ancien.get('test_match')
             self.resultats = {int(k): Match.depuis_dict(v) for k, v in ancien.get('resultats', {}).items()}
             self.origines = {int(k): v for k, v in ancien.get('origines', {}).items()}
             self.jobs = ancien.get('jobs', self.jobs)
@@ -121,7 +124,7 @@ class Archives:
     def sauvegarder(self) -> None:
         ecrire(self.index, {'saison': self.saison,
                             'resultats': {str(i): asdict(m) for i, m in self.resultats.items()},
-                            'origines': {str(i): v for i, v in self.origines.items()}, 'jobs': self.jobs, 'erreur': self.erreur})
+                            'origines': {str(i): v for i, v in self.origines.items()}, 'jobs': self.jobs, 'erreur': self.erreur, 'test_match': self.test_match})
 
     def est_nanterre(self, m: Match) -> bool:
         return self.criteres.equipe in (m.domicile_id, m.exterieur_id)
@@ -163,11 +166,59 @@ class Archives:
         # Avec 100 : 15 de réserve essentielle + 20 de marge = arrêt de l'import à 65.
         return max(0, api.quota - api.reserve - max(5, api.quota // 5))
 
+    async def preparer_test(self, api, maintenant: float) -> bool:
+        self.demande_test = False
+        if self.test_match is not None:
+            log.info('Test archive Nanterre déjà en attente : %s', self.test_match)
+            return True
+        candidats = [m for m in self.resultats.values() if self.est_nanterre(m)]
+        recent = max(candidats, key=lambda m: m.debut_ts) if candidats else None
+        besoin = (sum(self.details[recent.id][r]['etat'] == 'en_attente' for r in ('statistics', 'lineups'))
+                  if recent is not None else 3)
+        if not api.disponible(FOND) or api.compteur + besoin > self.plafond_import(api):
+            log.warning('Test archive Nanterre refusé : marge de quota préservée (%s/%s)', api.compteur, api.quota)
+            return True
+        if not candidats:
+            # Une seule page, un seul match : jamais de pagination ou d'import global forcé.
+            rep = await api.historique_equipe(self.criteres.equipe, 0)
+            for e in liste(rep, 'events') or []:
+                if not isinstance(e, dict):
+                    continue
+                ts, mid = entier(e.get('startTimestamp')), entier(e.get('id'))
+                if ts is None or mid is None or mid <= 0 or not self.debut <= ts < maintenant:
+                    continue
+                ev = preparer_evenement(e)
+                if entier(normaliser(ev).get('status.code')) != 100 or categorie(ev, self.criteres) != 'nanterre':
+                    continue
+                m = construire_match(ev, 'nanterre')
+                appliquer(m, normaliser(ev), maintenant)
+                finaliser(m, maintenant)
+                candidats.append(m)
+        if not candidats:
+            log.warning('Test archive Nanterre : aucun match terminé de la saison trouvé sur la première page')
+            return True
+        m = max(candidats, key=lambda m: m.debut_ts)
+        self.ajouter(m, historique=True, maintenant=maintenant, source=self.origines.get(m.id, 'import'))
+        self.test_match = m.id
+        self.sauvegarder()
+        log.info('Test archive Nanterre sélectionné : %s · %s · consultation du cache ou collecte unique', m.id, f"{m.domicile} - {m.exterieur}")
+        return True
+
     async def traiter(self, api, *, import_autorise: bool, maintenant: float) -> bool:
         self.changer_saison(maintenant)
         if maintenant < self.prochain or not api.disponible(FOND):
             return False
         self.prochain = maintenant + INTERVALLE_COLLECTE
+        if self.demande_test:
+            return await self.preparer_test(api, maintenant)
+        if self.test_match is not None:
+            if api.compteur < self.plafond_import(api):
+                if await self._collecter(api, self.test_match, maintenant):
+                    return True
+                log.info('Test archive Nanterre terminé : %s · données locales conservées', self.test_match)
+                self.test_match = None
+                self.sauvegarder()
+                return True
         # Les deux ressources d'un match suivi sont prioritaires. L'import ancien attend un jour libre.
         for mid, d in sorted(self.details.items(), reverse=True):
             if d['historique'] or maintenant < d['collecter_apres']:
