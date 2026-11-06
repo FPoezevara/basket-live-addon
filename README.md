@@ -2,7 +2,7 @@
 
 Add-on Home Assistant qui suit en direct les matchs de Nanterre 92 (toutes compétitions), de la Betclic Élite et des clubs français en coupe d'Europe, à partir de l'API SportsAPI Pro V2 (offre gratuite), et publie le tout dans Mosquitto par découverte MQTT.
 
-L'add-on ne fait que les données. Préférences, notifications, Live Activities et tableau de bord vivent dans Home Assistant.
+L'add-on publie les données et conserve les choix de suivi personnels. Préférences automatiques, notifications, Live Activities et tableau de bord vivent dans Home Assistant.
 
 ## Fonctionnement
 
@@ -31,13 +31,15 @@ Entités (appareil « Basket Live ») :
 |---|---|---|
 | `sensor.basket_live_matchs_a_venir` | nombre de matchs aujourd'hui et demain | `matchs` |
 | `sensor.basket_live_lives_en_cours` | nombre de lives (fin provisoire comprise) | `matchs` |
+| `sensor.basket_live_suivis_francis` | nombre de choix manuels actifs de Francis | `joueur`, `choix` (identifiant → booléen) |
+| `sensor.basket_live_suivis_ilona` | nombre de choix manuels actifs d’Ilona | `joueur`, `choix` (identifiant → booléen) |
 | `sensor.basket_live_resultats` | nombre de résultats sur `historique_jours` | `matchs` |
 | `sensor.basket_live_requetes_du_jour` | requêtes consommées | |
 | `sensor.basket_live_dernier_calendrier` | horodatage | |
 | `binary_sensor.basket_live_websocket` | connexion | |
 | `button.basket_live_rafraichir_le_calendrier` | | |
 
-Événements, non retenus, sur `basket_live/evenement` : `{"type": …, "match": {…}, "ts": …}`.
+Événements, non retenus, sur `basket_live/evenement` : `{"type": …, "match": {…}, "suivis": […], "exclus": […], "ts": …}`. Les destinataires sont capturés au moment de l’événement, avant le nettoyage des choix en fin de match.
 
 | Type | Quand |
 |---|---|
@@ -47,6 +49,7 @@ Entités (appareil « Basket Live ») :
 | `fin_provisoire` | premier statut « terminé » |
 | `reprise` | « terminé » annulé par le statisticien |
 | `statut` | report, annulation |
+| `suivi_actif` / `suivi_arrete` | choix personnel modifié ; champ `personne` pour le destinataire concerné |
 | `fin` | fin confirmée ; `tardif: true` si rattrapée plus de 4 h après l'entre-deux |
 
 Champs utiles d'un match : `categorie` (`nanterre`, `elite`, `europe`), `titre`, `tournoi`, `score`, `resume`, `court` (« NAN 81-78 LMS »), `quarts_dom`, `quarts_ext`, `statut`, `chrono`, `temps_restant` (s), `horloge` (le chrono tourne), `debut`.
@@ -109,3 +112,33 @@ Un quota épuisé est journalisé : le WebSocket continue, mais les nouvelles v�
 REST doivent attendre le renouvellement du quota. Les appels effectués hors de l'add-on
 avec la même clé ne figurent pas dans ce compteur local ; un HTTP 429 bloque tous les
 nouveaux appels REST de l'add-on jusqu'au lendemain UTC.
+
+## Boutons Live personnels (0.3.0)
+
+La carte `basket-a-venir-card` 1.2.0 affiche les matchs à venir et en cours, avec un bouton Live
+à droite de l'heure et de la compétition : texte et contour blancs au repos, orange si le suivi
+est actif. Un appui active, le suivant désactive. Chaque compte HA utilise la correspondance
+`joueurs` déjà configurée pour les pronostics : Francis et Ilona ont chacun leurs choix, et peuvent
+suivre plusieurs matchs en parallèle. Un compte absent de cette correspondance ne peut pas agir
+sur les boutons. Cette personnalisation d'affichage n'introduit pas de droits d'accès par entité HA.
+
+La préférence « Live des matchs de Nanterre » active les boutons Nanterre par défaut. Une action
+sur un bouton est une dérogation personnelle pour cette seule rencontre, sans modifier la préférence
+automatique ni le choix des autres rencontres. Les pronostics sont indépendants du suivi live.
+
+Les commandes `basket_live/suivi/<joueur>/<id>/set` portent `ON` ou `OFF`, QoS 1, sans rétention.
+L'add-on valide le joueur et le match, sauvegarde le choix avant son accusé MQTT et publie les
+capteurs `sensor.basket_live_suivis_<joueur>`. L'attribut `choix` contient un booléen par identifiant :
+`true` pour suivre, `false` pour exclure ce match du suivi automatique, absence pour appliquer la
+préférence automatique. Le nombre de choix n'est pas limité par la longueur d'un état HA.
+Aucune requête SportsAPI n'est nécessaire pour un changement de sélection.
+
+Un choix fait en cours de match démarre immédiatement le live. L'arrêt ferme uniquement la
+notification de ce match pour cette personne. À la fin, l'événement contient les destinataires
+avant leur nettoyage, puis les notifications suivent le délai de fermeture existant de 30 minutes.
+Les deux anciens `input_text.basket_suivi_<joueur>_id` restent seulement pour migrer le choix
+unique existant ; ils sont vidés après confirmation, sans écraser un choix déjà fait avec les boutons.
+Les listes déroulantes et leurs anciennes automatisations sont supprimées.
+
+Installation : voir [homeassistant/INSTALLATION-LIVE.md](homeassistant/INSTALLATION-LIVE.md).
+Tests de la carte : `node --test tests/test_card_live.cjs`.

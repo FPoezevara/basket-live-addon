@@ -1,8 +1,8 @@
 /*
- * Carte « Aujourd'hui et demain » de Basket Live, avec pronostic par bascule à trois positions.
+ * Carte « Aujourd'hui et demain » : boutons Live personnels et pronostics à trois positions.
  *
  * Emplacement : /config/www/basket-a-venir-card.js, ressource /local/basket-a-venir-card.js (module).
- * Données : attribut `matchs` de sensor.basket_live_matchs_a_venir, et menus select publiés par
+ * Données : matchs à venir/en cours, choix de sensor.basket_live_suivis_<joueur>, et menus select publiés par
  * l'add-on (attributs `joueur`, `match_id`, options [—, domicile, extérieur]).
  *
  * Configuration :
@@ -12,7 +12,7 @@
  *     7521abea3321478f8c461ee465767fcb: ilona
  */
 
-const VERSION = "1.1.0";
+const VERSION = "1.2.0";
 const EUROPE = new Set([138, 141, 9357, 2165]);
 const AUCUN = "—";
 
@@ -29,7 +29,11 @@ const heure = (d) => d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2
 
 class BasketAVenirCard extends HTMLElement {
   setConfig(config) {
-    this._config = { capteur: "sensor.basket_live_matchs_a_venir", joueurs: {}, ...config };
+    this._config = { capteur: "sensor.basket_live_matchs_a_venir", capteur_lives: "sensor.basket_live_lives_en_cours", joueurs: {}, ...config };
+    for (const timer of Object.values(this._minuteursLive || {})) clearTimeout(timer);
+    this._enAttenteLive = {};
+    this._minuteursLive = {};
+    this._erreursLive = {};
     this._enAttente = {}; // match_id -> côté choisi, en attendant la confirmation de HA
     if (!this.shadowRoot) {
       this.attachShadow({ mode: "open" });
@@ -40,6 +44,7 @@ class BasketAVenirCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    this._actualiserAttentesLive();
     const sig = this._calculerSignature();
     if (sig !== this._signature) {
       this._signature = sig;
@@ -59,9 +64,90 @@ class BasketAVenirCard extends HTMLElement {
   }
 
   _matchs() {
-    const etat = this._hass?.states[this._config.capteur];
-    const liste = etat?.attributes?.matchs;
-    return Array.isArray(liste) ? [...liste].sort((a, b) => String(a.debut).localeCompare(String(b.debut))) : [];
+    const futurs = this._hass?.states[this._config.capteur]?.attributes?.matchs;
+    const lives = this._hass?.states[this._config.capteur_lives]?.attributes?.matchs;
+    const matchs = new Map();
+    for (const m of [...(Array.isArray(futurs) ? futurs : []), ...(Array.isArray(lives) ? lives : [])]) {
+      const id = Number(m?.id);
+      if (Number.isSafeInteger(id) && id > 0 && !m.termine) matchs.set(id, { ...m, id });
+    }
+    return [...matchs.values()].sort((a, b) => String(a.debut).localeCompare(String(b.debut)) || a.id - b.id);
+  }
+
+  _selection(joueur = this._joueur()) {
+    const etat = this._hass?.states[`sensor.basket_live_suivis_${joueur}`];
+    const choix = etat?.attributes?.choix;
+    if (!joueur || !etat || ["unknown", "unavailable"].includes(etat.state)
+        || !choix || typeof choix !== "object" || Array.isArray(choix)) return null;
+    return choix;
+  }
+
+  _suiviConfirme(match, joueur = this._joueur()) {
+    const explicite = this._selection(joueur)?.[match.id];
+    if (typeof explicite === "boolean") return explicite;
+    return match.categorie === "nanterre"
+      && this._hass?.states[`input_boolean.basket_${joueur}_live_nanterre`]?.state === "on";
+  }
+
+  _suiviActif(match) {
+    const attente = this._enAttenteLive[`${this._joueur()}:${match.id}`];
+    return attente ? attente.actif : this._suiviConfirme(match);
+  }
+
+  _finirAttenteLive(cle) {
+    clearTimeout(this._minuteursLive[cle]);
+    delete this._minuteursLive[cle];
+    delete this._enAttenteLive[cle];
+  }
+
+  _actualiserAttentesLive() {
+    for (const [cle, attente] of Object.entries(this._enAttenteLive)) {
+      if (this._selection(attente.joueur)?.[attente.matchId] === attente.actif) this._finirAttenteLive(cle);
+    }
+    for (const [joueur, erreur] of Object.entries(this._erreursLive)) {
+      if (this._selection(joueur)?.[erreur.matchId] === erreur.actif
+          || !this._matchs().some(m => m.id === erreur.matchId)) delete this._erreursLive[joueur];
+    }
+  }
+
+  disconnectedCallback() {
+    for (const cle of Object.keys(this._enAttenteLive)) this._finirAttenteLive(cle);
+  }
+
+  async _basculerLive(matchId) {
+    const joueur = this._joueur();
+    const match = this._matchs().find(m => m.id === matchId);
+    const cle = `${joueur}:${matchId}`;
+    if (!match || !this._selection() || this._enAttenteLive[cle]) return;
+    const actif = !this._suiviConfirme(match);
+    if (actif && [60, 70].includes(match.code)) return;
+    const attente = { joueur, matchId, actif };
+    this._enAttenteLive[cle] = attente;
+    delete this._erreursLive[joueur];
+    this._minuteursLive[cle] = setTimeout(() => {
+      if (this._enAttenteLive[cle] !== attente) return;
+      this._finirAttenteLive(cle);
+      if (this._matchs().some(m => m.id === matchId)
+          && this._selection(joueur)?.[matchId] !== actif) {
+        this._erreursLive[joueur] = { matchId, actif, message: "Le suivi n’a pas été confirmé. Réessaie." };
+      }
+      this._signature = null;
+      if (this._hass) this.hass = this._hass;
+    }, 8000);
+    this._signature = null;
+    this._rendre();
+    try {
+      await this._hass.callService("script", "basket_live_selectionner", { personne: joueur, match_id: matchId, actif });
+    } catch (err) {
+      // Même si l'accusé MQTT est arrivé entre-temps, ne jamais annuler un choix confirmé.
+      if (this._enAttenteLive[cle] === attente) {
+        this._finirAttenteLive(cle);
+        this._erreursLive[joueur] = { matchId, actif, message: "Le suivi n’a pas pu être modifié. Réessaie." };
+        this._signature = null;
+        if (this._hass) this.hass = this._hass;
+      }
+      console.error("basket-a-venir-card live", err);
+    }
   }
 
   _menus() {
@@ -79,7 +165,12 @@ class BasketAVenirCard extends HTMLElement {
   _calculerSignature() {
     const capteur = this._hass?.states[this._config.capteur];
     const menus = this._menus();
-    const parts = [capteur?.last_updated ?? "absent", this._joueur() ?? "-"];
+    const joueur = this._joueur();
+    const parts = [capteur?.last_updated ?? "absent", joueur ?? "-",
+      this._hass?.states[this._config.capteur_lives]?.last_updated ?? "absent",
+      JSON.stringify(this._selection()),
+      this._hass?.states[`input_boolean.basket_${joueur}_live_nanterre`]?.state ?? "off",
+      JSON.stringify(this._enAttenteLive), JSON.stringify(this._erreursLive[joueur] ?? null)];
     for (const [id, m] of Object.entries(menus)) parts.push(`${id}=${m.etat.state}`);
     parts.push(JSON.stringify(this._enAttente));
     return parts.join("|");
@@ -96,6 +187,11 @@ class BasketAVenirCard extends HTMLElement {
   // --- interaction ---------------------------------------------------------------------
 
   _clic(e) {
+    const live = e.target.closest("[data-live]");
+    if (live) {
+      if (!live.disabled) void this._basculerLive(Number(live.dataset.live));
+      return;
+    }
     const cible = e.target.closest("[data-match][data-cote]");
     if (!cible) return;
     const matchId = Number(cible.dataset.match);
@@ -131,7 +227,7 @@ class BasketAVenirCard extends HTMLElement {
     const menus = this._menus();
     let html = "";
     let jourCourant = "";
-    if (!this._hass?.states[this._config.capteur]) {
+    if (!this._hass?.states[this._config.capteur] && matchs.length === 0) {
       html = `<div class="vide">Capteur ${echapper(this._config.capteur)} introuvable.</div>`;
     } else if (matchs.length === 0) {
       html = `<div class="vide">Aucun match prévu.</div>`;
@@ -144,9 +240,18 @@ class BasketAVenirCard extends HTMLElement {
         html += `<div class="jour">${echapper(jour)}</div>`;
       }
       const drapeau = EUROPE.has(m.tournoi_id) ? "🇪🇺" : "🇫🇷";
-      const statut = m.code === 60 || m.code === 70 ? ` · <span class="statut">${echapper(m.statut)}</span>` : "";
+      const statut = m.en_cours || m.fin_provisoire || m.code === 60 || m.code === 70
+        ? ` · <span class="statut">${echapper(m.statut)}</span>` : "";
       const menu = menus[m.id];
-      html += `<div class="match"><div class="meta">${heure(d)} · ${drapeau} ${echapper(m.tournoi)}${statut}</div>`;
+      const actif = this._suiviActif(m);
+      const attente = Boolean(this._enAttenteLive[`${this._joueur()}:${m.id}`]);
+      const indisponible = !this._selection() || (!actif && [60, 70].includes(m.code));
+      const titreLive = indisponible ? "Suivi live indisponible"
+        : `${actif ? "Arrêter" : "Suivre"} le live de ${m.titre || `${m.domicile} - ${m.exterieur}`}`;
+      html += `<div class="match"><div class="meta"><span class="meta-texte">${heure(d)} · ${drapeau} ${echapper(m.tournoi)}${statut}</span>
+        <button class="live-bouton${actif ? " actif" : ""}" data-live="${m.id}"
+          aria-pressed="${actif}" aria-busy="${attente}" aria-label="${echapper(titreLive)}"
+          title="${echapper(titreLive)}" ${attente || indisponible ? "disabled" : ""}>Live</button></div>`;
       if (menu) {
         const cote = this._cote(menu, m.id);
         html += `
@@ -165,6 +270,8 @@ class BasketAVenirCard extends HTMLElement {
       }
       html += `</div>`;
     }
+    const erreur = this._erreursLive[this._joueur()];
+    if (erreur) html += `<div class="erreur-live" role="status">${echapper(erreur.message)}</div>`;
     const titre = this._config.titre ? `<h1 class="titre">${echapper(this._config.titre)}</h1>` : "";
     this.shadowRoot.innerHTML = `<style>${STYLE}</style><ha-card>${titre}<div class="contenu">${html}</div></ha-card>`;
   }
@@ -178,7 +285,18 @@ const STYLE = `
   .jour { font-weight: 600; margin: 14px 0 4px; color: var(--primary-text-color); }
   .jour:first-child { margin-top: 2px; }
   .match { padding: 6px 0 8px 12px; border-left: 2px solid var(--divider-color); margin-bottom: 4px; }
-  .meta { font-size: 0.85em; color: var(--secondary-text-color); margin-bottom: 6px; }
+  .meta { display: flex; align-items: center; gap: 10px; font-size: 0.85em;
+          color: var(--secondary-text-color); margin-bottom: 6px; }
+  .meta-texte { flex: 1; min-width: 0; }
+  .live-bouton { appearance: none; flex: none; margin-left: auto; min-height: 30px; padding: 3px 10px;
+                 border: 1px solid currentColor; border-radius: 16px; color: #fff;
+                 background: rgba(0,0,0,.24); font: inherit; font-size: .9em; font-weight: 600;
+                 line-height: 1.2; cursor: pointer; transition: color .15s, background .15s; }
+  .live-bouton.actif { color: var(--accent); background: rgba(242,107,29,.1); }
+  .live-bouton:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+  .live-bouton:disabled { cursor: default; opacity: .5; }
+  .live-bouton[aria-busy="true"] { cursor: wait; opacity: .7; }
+  .erreur-live { color: var(--error-color, #c62828); font-size: .85em; margin-top: 8px; }
   .statut { color: var(--error-color, #c62828); }
   .duel { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; }
   .equipe { all: unset; cursor: pointer; color: var(--primary-text-color); line-height: 1.25;
@@ -276,7 +394,7 @@ window.customCards.push(
   {
     type: "basket-a-venir-card",
     name: "Basket Live · Aujourd'hui et demain",
-    description: "Matchs à venir groupés par jour, pronostic par bascule à trois positions.",
+    description: "Matchs à venir et en cours, boutons Live personnels et pronostics.",
   },
   { type: "basket-entete-card", name: "Basket Live · En-tête", description: "Titre sur fond de terrain de basket." },
 );

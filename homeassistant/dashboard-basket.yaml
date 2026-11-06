@@ -1,7 +1,7 @@
 # Tableau de bord « Basket » (URL : dashboard-basket), tel qu'exporté par l'éditeur de HA le 05/11/2026.
 # À coller dans : tableau de bord > crayon > ⋮ > Éditeur de configuration brute.
 # Visibilité par utilisateur : Francis c2af4c5a…, Ilona 7521abea… (user_id HA).
-# Ressource requise : /local/basket-a-venir-card.js?v=2 (module), copie de www/basket-a-venir-card.js.
+# Ressource requise : /local/basket-a-venir-card.js?v=1.2.0 (module), copie de www/basket-a-venir-card.js.
 title: Basket
 views:
   - title: Direct
@@ -107,7 +107,6 @@ views:
                 users:
                   - c2af4c5a136e448ab37deaae63146536
             entities:
-              - entity: input_select.basket_suivi_francis
               - entity: input_boolean.basket_francis_live_nanterre
               - entity: input_boolean.basket_francis_resultat_nanterre
               - entity: input_boolean.basket_francis_resultats_elite
@@ -118,7 +117,6 @@ views:
                 users:
                   - 7521abea3321478f8c461ee465767fcb
             entities:
-              - entity: input_select.basket_suivi_ilona
               - entity: input_boolean.basket_ilona_live_nanterre
               - entity: input_boolean.basket_ilona_resultat_nanterre
               - entity: input_boolean.basket_ilona_resultats_elite

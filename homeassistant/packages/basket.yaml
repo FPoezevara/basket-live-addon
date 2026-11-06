@@ -7,9 +7,9 @@
 # Par personne :
 #   - 4 interrupteurs : live Nanterre, résultat Nanterre,
 #     résultats Élite, résultats Europe ;
-#   - 1 sélecteur de match à suivre en live (interface) doublé d'un
-#     input_text qui garde l'identifiant (état) : le sélecteur est
-#     réinitialisé quand la liste des matchs change, pas l'identifiant.
+#   - plusieurs boutons Live dans la carte Aujourd'hui et demain ;
+#     les choix sont conservés par l'add-on et publiés en MQTT.
+# Les anciens input_text ne servent plus qu'à migrer le choix unique existant.
 # Règle « le live suffit » : qui suit un match en live ne reçoit pas
 # en plus la notification de résultat.
 # =====================================================================
@@ -40,18 +40,6 @@ input_boolean:
     name: Résultats européens des clubs français
     icon: mdi:earth
 
-input_select:
-  basket_suivi_francis:
-    name: Match suivi en live
-    icon: mdi:eye
-    options:
-      - Aucun
-  basket_suivi_ilona:
-    name: Match suivi en live
-    icon: mdi:eye
-    options:
-      - Aucun
-
 input_text:
   basket_suivi_francis_id:
     name: Francis, identifiant du match suivi
@@ -61,6 +49,29 @@ input_text:
     max: 20
 
 script:
+  basket_live_selectionner:
+    alias: Basket - choisir le suivi d'un match
+    mode: queued
+    max: 50
+    fields:
+      personne:
+        description: francis ou ilona
+      match_id:
+        description: Identifiant du match
+      actif:
+        description: true pour suivre, false pour arrêter ce match
+    sequence:
+      - condition: template
+        value_template: >-
+          {{ personne in ['francis', 'ilona'] and (match_id | int(0)) > 0
+             and actif is boolean }}
+      - action: mqtt.publish
+        data:
+          topic: "basket_live/suivi/{{ personne }}/{{ match_id | int }}/set"
+          payload: "{{ 'ON' if actif else 'OFF' }}"
+          qos: 1
+          retain: false
+
   # Live : Live Activity sur l'iPhone de Francis, notification persistante
   # mise à jour sur place chez Ilona (Android 15, pas de Live Update).
   basket_live_pousser:
@@ -204,7 +215,7 @@ automation:
       - condition: template
         value_template: >-
           {{ trigger.payload_json is defined
-             and trigger.payload_json.type in ['debut', 'maj', 'periode', 'fin_provisoire', 'reprise', 'fin'] }}
+             and trigger.payload_json.type in ['debut', 'maj', 'periode', 'fin_provisoire', 'reprise', 'fin', 'suivi_actif', 'suivi_arrete'] }}
     actions:
       - variables:
           type_evt: "{{ trigger.payload_json.type }}"
@@ -217,16 +228,36 @@ automation:
           sequence:
             - variables:
                 p: "{{ repeat.item }}"
-                # Comparaison en entiers : le rendu natif transforme les identifiants en nombres
+                concerne: >-
+                  {{ type_evt not in ['suivi_actif', 'suivi_arrete']
+                     or trigger.payload_json.personne | default('') == repeat.item }}
+                # Les destinataires sont capturés dans l'événement : la liste de choix
+                # peut déjà être nettoyée lorsque HA traite une fin confirmée.
                 suit_live: >-
-                  {{ (match.categorie == 'nanterre' and is_state('input_boolean.basket_' ~ repeat.item ~ '_live_nanterre', 'on'))
-                     or (states('input_text.basket_suivi_' ~ repeat.item ~ '_id') | int(0)) == match.id }}
+                  {% set p = repeat.item %}
+                  {% set choix = state_attr('sensor.basket_live_suivis_' ~ p, 'choix') or {} %}
+                  {% set manuel = p in trigger.payload_json.suivis
+                       if trigger.payload_json.suivis is defined
+                       else (choix.get(match.id | string) is sameas true) %}
+                  {% set exclu = p in trigger.payload_json.exclus
+                       if trigger.payload_json.exclus is defined
+                       else (choix.get(match.id | string) is sameas false) %}
+                  {{ manuel or (match.categorie == 'nanterre' and not exclu
+                     and is_state('input_boolean.basket_' ~ p ~ '_live_nanterre', 'on')) }}
                 veut_resultat: >-
                   {% set cle = {'nanterre': 'resultat_nanterre', 'elite': 'resultats_elite',
                                 'europe': 'resultats_europe'}.get(match.categorie) %}
                   {{ cle is not none and is_state('input_boolean.basket_' ~ repeat.item ~ '_' ~ cle, 'on') }}
             - choose:
-                - conditions: "{{ suit_live }}"
+                - conditions: "{{ type_evt == 'suivi_arrete' and concerne }}"
+                  sequence:
+                    - action: script.basket_live_clore
+                      data:
+                        personne: "{{ p }}"
+                        match_id: "{{ match.id }}"
+                - conditions: >-
+                    {{ suit_live and concerne and type_evt != 'suivi_arrete'
+                       and (type_evt != 'suivi_actif' or match.en_cours or match.fin_provisoire) }}
                   sequence:
                     - action: script.basket_live_pousser
                       data:
@@ -274,126 +305,56 @@ automation:
                 personne: "{{ repeat.item }}"
                 match_id: "{{ trigger.payload_json.match.id }}"
 
-  - id: basket_live_options
-    alias: Basket - liste des matchs à suivre
-    description: Recalcule les sélecteurs et y remet le match suivi par chacun
+  - id: basket_live_migrer_suivi
+    alias: Basket - migrer l'ancien choix de match
+    description: Reprend le choix unique antérieur sans écraser un choix déjà fait avec les boutons
     mode: queued
     max: 3
     triggers:
-      # to: null = changement d'état seulement, pas à chaque changement d'attribut (score)
-      - trigger: state
-        entity_id:
-          - sensor.basket_live_matchs_a_venir
-          - sensor.basket_live_lives_en_cours
-        to: ~
-      # L'état et la liste arrivent par deux messages MQTT distincts : la liste peut suivre l'état.
-      # Les attributs des matchs à venir ne changent pas au fil des paniers, on peut les écouter.
-      - trigger: state
-        entity_id: sensor.basket_live_matchs_a_venir
-        attribute: matchs
       - trigger: homeassistant
         event: start
-      # Filet de sécurité, sans coût : set_options sur une liste identique ne change rien
+      - trigger: state
+        entity_id:
+          - sensor.basket_live_suivis_francis
+          - sensor.basket_live_suivis_ilona
+        attribute: choix
       - trigger: time_pattern
-        minutes: /15
+        minutes: /5
     actions:
-      # Au démarrage, laisser le temps aux messages MQTT retenus d'arriver
-      - if:
-          - condition: template
-            value_template: "{{ trigger.platform == 'homeassistant' }}"
-        then:
-          - delay: "00:00:30"
-      # Add-on hors ligne (capteurs unavailable/unknown, attributs vides) : on ne touche à rien,
-      # sinon la liste retombe à « Aucun » et le sélecteur passe à inconnu.
-      - condition: template
-        value_template: >-
-          {{ states('sensor.basket_live_matchs_a_venir') not in ['unavailable', 'unknown']
-             and states('sensor.basket_live_lives_en_cours') not in ['unavailable', 'unknown'] }}
-      - variables:
-          options: >-
-            {% set jours = ['lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.', 'dim.'] %}
-            {% set liste = (state_attr('sensor.basket_live_lives_en_cours', 'matchs') or [])
-                         + (state_attr('sensor.basket_live_matchs_a_venir', 'matchs') or []) %}
-            {% set ns = namespace(l=[]) %}
-            {% for m in liste | sort(attribute='debut') %}
-              {% set d = as_datetime(m.debut) | as_local %}
-              {% set ns.l = ns.l + [jours[d.weekday()] ~ ' ' ~ d.strftime('%H:%M') ~ ' · ' ~ m.titre
-                                    ~ ' · ' ~ m.tournoi ~ ' · #' ~ m.id] %}
-            {% endfor %}
-            {{ ['Aucun'] + ns.l }}
       - repeat:
           for_each:
             - francis
             - ilona
           sequence:
-            - action: input_select.set_options
-              target:
-                entity_id: "input_select.basket_suivi_{{ repeat.item }}"
-              data:
-                options: "{{ options }}"
             - variables:
-                suivi: "{{ states('input_text.basket_suivi_' ~ repeat.item ~ '_id') | int(0) }}"
-                choix: >-
-                  {% set trouve = options | select('search', '#' ~ suivi ~ '$') | list if suivi > 0 else [] %}
-                  {{ trouve[0] if trouve else 'Aucun' }}
-            - action: input_select.select_option
-              target:
-                entity_id: "input_select.basket_suivi_{{ repeat.item }}"
-              data:
-                option: "{{ choix }}"
-
-  - id: basket_live_choix
-    alias: Basket - choix du match suivi
-    description: Mémorise le choix fait dans l'interface et démarre le live tout de suite si le match est en cours
-    mode: queued
-    max: 10
-    triggers:
-      - trigger: state
-        entity_id:
-          - input_select.basket_suivi_francis
-          - input_select.basket_suivi_ilona
-        to: ~
-    conditions:
-      # Seulement un choix fait par une personne, pas les remises à jour de la liste
-      - condition: template
-        value_template: "{{ trigger.to_state.context.user_id is not none }}"
-    actions:
-      - variables:
-          p: "{{ trigger.entity_id.split('_')[-1] }}"
-          nouveau: >-
-            {% set t = trigger.to_state.state %}
-            {{ (t | regex_findall_index('#([0-9]+)$')) | int(0) if '#' in t else 0 }}
-          ancien: "{{ states('input_text.basket_suivi_' ~ p ~ '_id') | int(0) }}"
-          lives: "{{ state_attr('sensor.basket_live_lives_en_cours', 'matchs') or [] }}"
-      - action: input_text.set_value
-        target:
-          entity_id: "input_text.basket_suivi_{{ p }}_id"
-        data:
-          value: "{{ nouveau if nouveau > 0 else '' }}"
-      # Abandon d'un match : on retire son live, sauf s'il reste couvert par « live Nanterre »
-      - if:
-          - condition: template
-            value_template: >-
-              {% set m = lives | selectattr('id', 'eq', ancien) | first | default(none) %}
-              {{ ancien > 0 and ancien != nouveau
-                 and not (m is not none and m.categorie == 'nanterre'
-                          and is_state('input_boolean.basket_' ~ p ~ '_live_nanterre', 'on')) }}
-        then:
-          - action: script.basket_live_clore
-            data:
-              personne: "{{ p }}"
-              match_id: "{{ ancien }}"
-      - variables:
-          en_cours: "{{ lives | selectattr('id', 'eq', nouveau) | first | default(none) }}"
-      - if:
-          - condition: template
-            value_template: "{{ en_cours is not none }}"
-        then:
-          - action: script.basket_live_pousser
-            data:
-              personne: "{{ p }}"
-              match: "{{ en_cours }}"
-              final: false
+                p: "{{ repeat.item }}"
+                ancien: "{{ states('input_text.basket_suivi_' ~ repeat.item ~ '_id') | int(0) }}"
+                choix: "{{ state_attr('sensor.basket_live_suivis_' ~ repeat.item, 'choix') }}"
+                disponibles: >-
+                  {{ (state_attr('sensor.basket_live_matchs_a_venir', 'matchs') or [])
+                     + (state_attr('sensor.basket_live_lives_en_cours', 'matchs') or []) }}
+            - if:
+                - condition: template
+                  value_template: >-
+                    {{ ancien > 0 and choix is mapping
+                       and states('sensor.basket_live_suivis_' ~ p) not in ['unknown', 'unavailable'] }}
+              then:
+                - choose:
+                    # Effacer l'ancien identifiant uniquement après confirmation par l'add-on.
+                    - conditions: "{{ (ancien | string) in choix }}"
+                      sequence:
+                        - action: input_text.set_value
+                          target:
+                            entity_id: "input_text.basket_suivi_{{ p }}_id"
+                          data:
+                            value: ""
+                    - conditions: "{{ disponibles | selectattr('id', 'eq', ancien) | list | count > 0 }}"
+                      sequence:
+                        - action: script.basket_live_selectionner
+                          data:
+                            personne: "{{ p }}"
+                            match_id: "{{ ancien }}"
+                            actif: true
 
 # Les attributs des lives changent à chaque panier : on ne les garde pas dans le recorder.
 # Si configuration.yaml contient déjà un bloc « recorder: », supprimer ce bloc-ci et ajouter

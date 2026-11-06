@@ -1,5 +1,15 @@
 # Journal des versions
 
+## 0.3.0
+
+- Boutons Live blancs/orange dans la carte Aujourd'hui et demain (carte 1.2.0), avec choix indépendants pour Francis et Ilona et plusieurs matchs simultanés.
+- Choix conservés dans l'état de l'add-on et publiés sur deux capteurs personnels ; aucun appel supplémentaire à SportsAPI et aucune limite liée à un champ texte de 255 caractères.
+- Les matchs commencés restent dans la carte pour pouvoir démarrer ou arrêter leur suivi ; les pronostics conservent leur fonctionnement.
+- Les choix prennent effet immédiatement en cours de match. Une désactivation ne ferme que la notification de la personne et du match concernés.
+- La préférence automatique Live Nanterre reste active par défaut, avec possibilité de déroger pour un match précis.
+- Migration du choix unique antérieur après confirmation MQTT ; nettoyage des choix à la fin du match et capture des destinataires avant ce nettoyage.
+- Mettre à jour le package, le dashboard et la ressource JavaScript en même temps que l'add-on.
+
 ## 0.2.3
 
 - Les connexions WebSocket ne consomment plus le quota REST et restent possibles lorsque ce quota est épuisé.

@@ -21,6 +21,7 @@ import aiohttp
 from . import VERSION, config
 from .api import ESSENTIEL, FOND, Api
 from .secours import resultat_correspondant
+from .suivis import Suivis
 from .pronos import Pronos, ouvert, saison
 from .modele import (CODE_TERMINE, CODES_EN_COURS, Criteres, Match, actif, appliquer, categorie,
                      construire_match, date_locale, entier, finaliser, maj_statique, normaliser, vue)
@@ -54,7 +55,8 @@ class App:
                                  cfg.pays_europe)
         if bus is None:
             from .bus import Bus
-            bus = Bus(cfg.mqtt_host, cfg.mqtt_port, cfg.mqtt_user, cfg.mqtt_password, self.sur_commande)
+            bus = Bus(cfg.mqtt_host, cfg.mqtt_port, cfg.mqtt_user, cfg.mqtt_password, self.sur_commande,
+                      joueurs=cfg.joueurs)
         self.bus = bus
         self.matchs: dict[int, Match] = {}
         self.resultats: list[Match] = []
@@ -70,6 +72,7 @@ class App:
         self.etat_modifie = False
         self.fichier_etat = cfg.dossier_donnees / "etat.json"
         self.pronos = Pronos(cfg.joueurs, set(cfg.tournois_elite))
+        self.suivis = Suivis(cfg.joueurs)
         self.api.sur_compteur = self.sauver_etat
 
     # --- utilitaires ---------------------------------------------------------------------
@@ -98,8 +101,19 @@ class App:
             if texte.strip() == "rafraichir":
                 self.demande_rafraichir = True
             return
-        # basket_live/prono/<joueur>/<id>/set
         morceaux = topic.split("/")
+        if len(morceaux) == 5 and morceaux[:2] == ["basket_live", "suivi"] and morceaux[4] == "set":
+            m = self.matchs.get(entier(morceaux[3]))
+            joueur, valeur = morceaux[2], texte.strip()
+            if m is not None and self.suivis.choisir(m, joueur, valeur):
+                self.marquer()
+                self.sauver_etat()  # le choix est durable avant l'accusé de réception MQTT
+                self.emettre_suivi("suivi_actif" if valeur == "ON" else "suivi_arrete", joueur, m)
+            else:
+                log.info("Suivi inchangé ou refusé (%s) : joueur, match ou valeur non admissible", topic)
+                self.sale = True
+            return
+        # basket_live/prono/<joueur>/<id>/set
         if len(morceaux) == 5 and morceaux[1] == "prono" and morceaux[4] == "set":
             m = self.matchs.get(entier(morceaux[3]))
             if m is not None and self.pronos.choisir(m, morceaux[2], texte.strip(), self.horloge()):
@@ -123,6 +137,7 @@ class App:
         self.resultats = [Match.depuis_dict(d) for d in etat.get("resultats", [])]
         self.dernier_calendrier = etat.get("dernier_calendrier", {})
         self.pronos.charger(etat.get("pronos", {}))
+        self.suivis.charger(etat.get("suivis", {}))
         api = etat.get("api", {})
         self.api.restaurer(api.get("jour", ""), api.get("compteur", 0),
                            api.get("compteur_secours", 0), api.get("compteur_instantanes", 0))
@@ -136,6 +151,7 @@ class App:
             "resultats": [asdict(m) for m in self.resultats],
             "dernier_calendrier": self.dernier_calendrier,
             "pronos": self.pronos.vers_dict(),
+            "suivis": self.suivis.vers_dict(),
             "api": {"jour": self.api.jour, "compteur": self.api.compteur,
                     "compteur_secours": self.api.compteur_secours,
                     "compteur_instantanes": self.api.compteur_instantanes},
@@ -154,6 +170,7 @@ class App:
         limite = maintenant - self.cfg.historique_jours * 86400
         self.resultats = [m for m in self.resultats if (m.termine_ts or 0) >= limite]
         self.pronos.nettoyer(set(self.matchs))
+        self.suivis.nettoyer({i for i, m in self.matchs.items() if not m.termine})
         garder = {jour.isoformat(), (jour + timedelta(days=1)).isoformat()}
         self.dernier_calendrier = {j: t for j, t in self.dernier_calendrier.items() if j in garder}
         if len(self.matchs) != avant:
@@ -165,12 +182,22 @@ class App:
     def emettre(self, type_: str, m: Match) -> None:
         maintenant = self.horloge()
         v = vue(m, self.tz, maintenant)
-        charge = {"type": type_, "match": v, "ts": datetime.fromtimestamp(maintenant, self.tz).isoformat()}
+        charge = {"type": type_, "match": v, **self.suivis.destinataires(m.id), "ts": datetime.fromtimestamp(maintenant, self.tz).isoformat()}
         self.bus.emettre(json.dumps(charge, ensure_ascii=False))
         if type_ != "fin":
             m.dernier_push_ts = maintenant
             m.push_en_attente = False
         log.info("%s · %s · %s", type_, v["titre"], v["resume"])
+
+    def emettre_suivi(self, type_: str, joueur: str, m: Match) -> None:
+        maintenant = self.horloge()
+        self.bus.emettre(json.dumps({"type": type_, "personne": joueur,
+                                    "match": vue(m, self.tz, maintenant),
+                                    **self.suivis.destinataires(m.id),
+                                    "ts": datetime.fromtimestamp(maintenant, self.tz).isoformat()},
+                                   ensure_ascii=False))
+        # Un choix personnel ne doit pas effacer une mise à jour de score destinée aux autres.
+        log.info("%s · %s · %s - %s", type_, joueur, m.domicile, m.exterieur)
 
     def cadencer(self) -> None:
         """Transforme les changements de score en événements « maj », au plus un par intervalle et par match."""
@@ -187,6 +214,7 @@ class App:
         self.resultats = [r for r in self.resultats if r.id != m.id]
         self.resultats.append(m)
         self.emettre("fin", m)
+        self.suivis.retirer(m.id)
         self.marquer()
 
     def publier(self) -> None:
@@ -211,6 +239,13 @@ class App:
         self.bus.poser(topic_etat("requetes_du_jour"), str(self.api.compteur))
         self.bus.poser(topic_etat("websocket"), "ON" if self.ws_connecte else "OFF")
         self.publier_pronos(maintenant)
+        if self.suivis.nettoyer({i for i, m in self.matchs.items() if not m.termine}):
+            self.etat_modifie = True
+        for joueur, choix in self.suivis.vers_dict().items():
+            objet = f"suivis_{joueur}"
+            self.bus.poser(topic_etat(objet), str(sum(choix.values())))
+            self.bus.poser(topic_attributs(objet), json.dumps({"joueur": joueur, "choix": choix},
+                                                             ensure_ascii=False))
         if self.dernier_calendrier:
             dernier = max(self.dernier_calendrier.values())
             self.bus.poser(topic_etat("dernier_calendrier"), datetime.fromtimestamp(dernier, self.tz).isoformat())

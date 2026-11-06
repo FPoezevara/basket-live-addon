@@ -22,6 +22,7 @@ RACINE = "basket_live"
 DISPO = f"{RACINE}/statut"
 EVENEMENT = f"{RACINE}/evenement"
 COMMANDE = f"{RACINE}/commande"
+SUIVI_SET = f"{RACINE}/suivi/+/+/set"
 PRONO_SET = f"{RACINE}/prono/+/+/set"
 STATUT_HA = "homeassistant/status"
 
@@ -61,9 +62,11 @@ def topic_attributs(objet: str) -> str:
     return f"{RACINE}/{objet}/attributs"
 
 
-def decouverte() -> list[tuple[str, str]]:
+def decouverte(joueurs=("francis", "ilona")) -> list[tuple[str, str]]:
     messages = []
-    for composant, objet, attributs, propre in ENTITES:
+    suivis = [("sensor", f"suivis_{j}", True,
+               {"name": f"Suivis {j.capitalize()}", "icon": "mdi:eye"}) for j in dict.fromkeys(joueurs)]
+    for composant, objet, attributs, propre in ENTITES + suivis:
         conf = {
             "unique_id": f"basket_live_{objet}",
             "availability_topic": DISPO,
@@ -83,9 +86,10 @@ def decouverte() -> list[tuple[str, str]]:
 
 class Bus:
     def __init__(self, host: str, port: int, user: str | None, password: str | None,
-                 sur_commande: Callable[[str, str], None]):
+                 sur_commande: Callable[[str, str], None], joueurs=("francis", "ilona")):
         self.host, self.port, self.user, self.password = host, port, user, password
         self.sur_commande = sur_commande
+        self.joueurs = tuple(joueurs)
         self.retenus: dict[str, str] = {}
         self.a_publier: set[str] = set()
         self.evenements: deque[str] = deque(maxlen=200)
@@ -103,7 +107,7 @@ class Bus:
         self.signal.set()
 
     async def _publier_tout(self, client: aiomqtt.Client) -> None:
-        for topic, payload in decouverte():
+        for topic, payload in decouverte(self.joueurs):
             await client.publish(topic, payload, qos=1, retain=True)
         self.a_publier = set(self.retenus)
         self.signal.set()
@@ -114,7 +118,7 @@ class Bus:
             if message.topic.matches(STATUT_HA) and texte == "online":
                 log.info("Home Assistant redémarré : republication")
                 await self._publier_tout(client)
-            elif message.topic.matches(COMMANDE) or message.topic.matches(PRONO_SET):
+            elif message.topic.matches(COMMANDE) or message.topic.matches(PRONO_SET) or message.topic.matches(SUIVI_SET):
                 self.sur_commande(message.topic.value, texte)
 
     async def _vider(self, client: aiomqtt.Client) -> None:
@@ -150,6 +154,7 @@ class Bus:
                     await client.subscribe(COMMANDE, qos=1)
                     await client.subscribe(STATUT_HA, qos=1)
                     await client.subscribe(PRONO_SET, qos=1)
+                    await client.subscribe(SUIVI_SET, qos=1)
                     await self._publier_tout(client)
                     reception = asyncio.create_task(self._recevoir(client))
                     try:
