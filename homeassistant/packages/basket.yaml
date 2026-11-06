@@ -484,3 +484,6 @@ recorder:
   exclude:
     entities:
       - sensor.basket_live_lives_en_cours
+      - sensor.basket_live_resultats_saison
+    entity_globs:
+      - sensor.basket_live_statistiques_*

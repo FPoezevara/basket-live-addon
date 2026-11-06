@@ -77,7 +77,8 @@ class Api:
         if self.session:
             await self.session.close()
 
-    async def get(self, chemin: str, priorite: str = FOND, *, base: str | None = None) -> dict | None:
+    async def get(self, chemin: str, priorite: str = FOND, *, base: str | None = None,
+                  vide_404: bool = False) -> dict | None:
         if not self.disponible(priorite):
             log.warning("Quota local atteint (%s/%s), requête %s non envoyée", self.compteur, self.quota, chemin)
             return None
@@ -90,6 +91,8 @@ class Api:
                     if self.sur_compteur:
                         self.sur_compteur()
                     return None
+                if rep.status == 404 and vide_404:
+                    return {"events": [], "hasNextPage": False}
                 if rep.status != 200:
                     log.warning("HTTP %s sur %s", rep.status, chemin)
                     return None
@@ -131,3 +134,18 @@ class Api:
         if not isinstance(data, dict) or not isinstance(data.get("games"), list):
             return None
         return data["games"]
+
+    async def details_match(self, identifiant: int, ressource: str):
+        if ressource not in ("statistics", "lineups"):
+            raise ValueError("Ressource statistique non autorisée")
+        return await self.get(f"/api/match/{identifiant}/{ressource}", FOND)
+
+    async def saisons_tournoi(self, identifiant: int):
+        return await self.get(f"/api/tournament/{identifiant}/seasons", FOND)
+
+    async def historique_tournoi(self, identifiant: int, saison_id: int, page: int):
+        return await self.get(f"/api/tournament/{identifiant}/season/{saison_id}/events/last/{page}",
+                              FOND, vide_404=True)
+
+    async def historique_equipe(self, identifiant: int, page: int):
+        return await self.get(f"/api/teams/{identifiant}/events/last/{page}", FOND, vide_404=True)

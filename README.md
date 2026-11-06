@@ -15,6 +15,8 @@ L'add-on publie les données et conserve les choix de suivi personnels. Préfér
 | Match attendu ou en cours sans données récentes, même avec WebSocket connecté | `/api/live` toutes les 5 min au plus | Rattrapage, partagé entre les matchs, soumis au quota |
 | Rafraîchissement manuel | Calendriers et, si des matchs sont actifs, `/api/live` | Rattrapage immédiat (bouton limité à une fois toutes les 5 min) |
 | Après 90 min et 10 min sans changement de score/statut | Calendrier V1, toutes les 10 min au plus par date UTC | Secours de fin indépendant de V2, deux résultats identiques espacés de `delai_fin` |
+| 15 min après la fin confirmée d’un match de Nanterre | 1 appel `statistics` + 1 appel `lineups` | Collecte unique, cache permanent de saison |
+| Journée sans match suivi, calendrier du jour vérifié | Pages de résultats et statistiques historiques, au plus 1 appel/minute | Import progressif, arrêté à 65 requêtes totales sur 100 |
 | WebSocket indisponible | `/api/live` toutes les 2 min | Mode secours |
 
 Le statut « terminé » peut osciller en fin de match (observé sur Chalon - Kalev le 4 novembre 2026 : terminé, pause, terminé). Un match n'est déclaré fini qu'après `delai_fin` secondes de statut stable et confirmation par le calendrier, avec au plus trois tentatives avant de se fier aux seules données live.
@@ -35,6 +37,8 @@ Entités (appareil « Basket Live ») :
 | `sensor.basket_live_suivis_francis` | nombre de choix manuels actifs de Francis | `joueur`, `choix` (identifiant → booléen) |
 | `sensor.basket_live_suivis_ilona` | nombre de choix manuels actifs d’Ilona | `joueur`, `choix` (identifiant → booléen) |
 | `sensor.basket_live_resultats` | nombre de résultats sur `historique_jours` | `matchs` |
+| `sensor.basket_live_resultats_saison` | nombre de résultats de la saison | `saison`, `matchs`, `import` |
+| `sensor.basket_live_statistiques_<matchId>` | nombre de ressources enregistrées (0 à 2) | `statistics`, `lineups`, réponses brutes conservées |
 | `sensor.basket_live_requetes_du_jour` | requêtes consommées | |
 | `sensor.basket_live_dernier_calendrier` | horodatage | |
 | `binary_sensor.basket_live_websocket` | connexion | |
@@ -62,6 +66,20 @@ Dans les événements, le chrono est extrapolé à l'instant de l'envoi ; dans l
 1. Paramètres, Modules complémentaires, Boutique, menu ⋮, Dépôts : ajouter `https://github.com/FPoezevara/basket-live-addon`.
 2. Installer « Basket Live », renseigner la clé API dans Configuration, démarrer.
 3. Vérifier dans le journal : `Calendrier du … : N matchs suivis` et `Connecté à MQTT`.
+
+## Historique de saison et feuilles de match
+
+L’onglet **Historique** conserve tous les résultats des compétitions suivies pour la saison courante (2026-2027 actuellement), indépendamment de la tuile des sept derniers jours. La saison suit le découpage existant des pronostics : du 1er juillet au 30 juin. Les fichiers des saisons précédentes restent conservés.
+
+Seules les rencontres de Nanterre se déplient : comparaison des équipes par période, scores par quart-temps, feuille de match des deux équipes et indicateurs détaillés pour chaque joueur. Les zéros sont conservés ; les données absentes sont indiquées par un tiret. Les indicateurs supplémentaires fournis par l’API sont également affichés. Le tableau des joueurs défile horizontalement sur téléphone.
+
+Les deux ressources V2 `/api/match/{matchId}/statistics` et `/api/match/{matchId}/lineups` sont demandées une seule fois chacune après la fin confirmée de Nanterre, à partir de 15 minutes après confirmation, avec au moins une minute entre les collectes. Les réponses brutes sont enregistrées sous `/data/archives/<saison>/statistiques/<matchId>.json`. L’index et la progression de l’import sont enregistrés dans `/data/archives/<saison>/index.json`. Ces fichiers utilisent le stockage persistant de l’add-on. Cliquer dans l’accordéon consulte uniquement les données MQTT locales, sans appel REST, y compris pour plusieurs utilisateurs simultanés.
+
+Les résultats antérieurs à l’installation sont importés progressivement depuis les pages de résultats de Nanterre (toutes compétitions) et des tournois configurés (Élite et clubs français en Europe). Cet import et la collecte des statistiques anciennes attendent une journée sans match suivi, après vérification réussie du calendrier du jour. Avec le quota de 100, ils s’arrêtent dès que le compteur total atteint 65 : 20 requêtes de marge supplémentaires et 15 réservées aux opérations essentielles. Ils reprennent un autre jour libre ; l’historique peut donc rester partiel quelque temps. Les nouvelles statistiques après-match restent dans le budget de fond existant de 85 requêtes ; aucun quota additionnel n’est créé.
+
+La réservation de chaque collecte est persistée avant l’appel. Une erreur ou une interruption incertaine ne provoque aucun nouvel essai automatique de cette ressource ; la carte l’indique. Cette règle garantit une seule tentative par ressource et par match, même après redémarrage, mais ne récupère pas les corrections publiées plus tard par le fournisseur. Les importations anciennes ne déclenchent ni notification de fin, ni attribution rétroactive de points de pronostics.
+
+Installation détaillée : [Historique 0.5.0](homeassistant/INSTALLATION-HISTORIQUE.md). Ajouter la ressource JavaScript **module** `/local/basket-historique-card.js?v=1.0.0`, puis l’onglet prévu dans le dashboard. Les gros attributs des archives sont exclus du recorder par le package fourni ; les fichiers de l’add-on restent leur stockage durable.
 
 ## Concours de pronostics
 

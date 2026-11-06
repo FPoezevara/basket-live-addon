@@ -1,5 +1,14 @@
 # Journal des versions
 
+## 0.5.0
+
+- Nouvel onglet Historique : résultats de toute la saison courante, distincts des sept derniers jours, avec filtre Nanterre et regroupement par mois.
+- Accordéons réservés aux matchs de Nanterre : comparaison des équipes par période, feuille de match des deux équipes et tous les indicateurs joueurs fournis.
+- Collecte unique de `statistics` et `lineups`, à partir de 15 minutes après la fin confirmée, avec réservation durable avant appel. Cache JSON persistant par saison et match ; aucun appel à l’ouverture des accordéons.
+- Import progressif des résultats anciens et de leurs statistiques uniquement les jours sans match suivi, après vérification du calendrier, avec plafond partagé de 65 sur 100 et au plus une requête par minute.
+- Pagination et progression persistées, saisons découvertes via l’API, conservation des résultats suivis face aux pages V2 anciennes et absence de notifications/pronostics rétroactifs.
+- Nouveaux capteurs MQTT de saison et de statistiques par match, exclus du recorder. Mettre à jour l’add-on, le package, le dashboard et ajouter la nouvelle ressource JavaScript.
+
 ## 0.4.0
 
 - Remplacement de l'attente de 30 minutes dans Home Assistant par des échéances persistées dans l'add-on et publiées en MQTT retenu. Home Assistant reprend les fermetures échues au démarrage et à chaque minute ; acquittement uniquement après traitement.

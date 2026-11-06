@@ -21,6 +21,7 @@ import aiohttp
 from . import VERSION, config
 from .api import ESSENTIEL, FOND, Api
 from .secours import resultat_correspondant
+from .archives import Archives
 from .notifications import Notifications
 from .suivis import Suivis
 from .pronos import Pronos, ouvert, saison
@@ -75,6 +76,8 @@ class App:
         self.pronos = Pronos(cfg.joueurs, set(cfg.tournois_elite))
         self.suivis = Suivis(cfg.joueurs)
         self.notifications = Notifications(cfg.joueurs)
+        self.demarrage_ts = self.horloge()
+        self.archives = Archives(cfg.dossier_donnees, self.tz, self.criteres, self.demarrage_ts)
         self.api.sur_compteur = self.sauver_etat
 
     # --- utilitaires ---------------------------------------------------------------------
@@ -154,6 +157,8 @@ class App:
         self.pronos.charger(etat.get("pronos", {}))
         self.suivis.charger(etat.get("suivis", {}))
         self.notifications.charger(etat.get("notifications", {}))
+        for m in self.resultats:
+            self.archives.ajouter(m, historique=True, maintenant=self.horloge())
         api = etat.get("api", {})
         self.api.restaurer(api.get("jour", ""), api.get("compteur", 0),
                            api.get("compteur_secours", 0), api.get("compteur_instantanes", 0))
@@ -230,6 +235,7 @@ class App:
             log.info("Pronostics de %s - %s : %s", m.domicile, m.exterieur, e["points"])
         self.resultats = [r for r in self.resultats if r.id != m.id]
         self.resultats.append(m)
+        self.archives.ajouter(m, historique=False, maintenant=self.horloge())
         self.actualiser_notifications()  # échéance sauvegardée avant l'émission non retenue de fin
         self.emettre("fin", m)
         self.suivis.retirer(m.id)
@@ -240,7 +246,19 @@ class App:
             self.marquer()
             self.sauver_etat()
 
+    def import_archives_autorise(self) -> bool:
+        jour = self.aujourdhui()
+        debut_jour = datetime.combine(jour, heure(0), self.tz).timestamp()
+        if self.dernier_calendrier.get(jour.isoformat(), 0) < debut_jour:
+            return False  # ne pas supposer une journée libre avant un calendrier du jour réussi
+        return not any(date_locale(m.debut_ts, self.tz) == jour and m.code not in (60, 70)
+                       for m in list(self.matchs.values()) + list(self.archives.resultats.values()))
+
     def publier(self) -> None:
+        self.archives.changer_saison(self.horloge())
+        for m in self.resultats:
+            self.archives.ajouter(m, historique=(m.termine_ts or 0) < self.demarrage_ts,
+                                  maintenant=self.horloge())
         self.actualiser_notifications()
         maintenant = self.horloge()
         jour = self.aujourdhui()
@@ -273,6 +291,8 @@ class App:
         echeances = self.notifications.attributs()
         self.bus.poser(topic_etat("notifications"), str(len(echeances["echeances"])))
         self.bus.poser(topic_attributs("notifications"), json.dumps(echeances, ensure_ascii=False))
+        for topic, payload in self.archives.messages(maintenant, self.import_archives_autorise(), self.api):
+            self.bus.poser(topic, payload)
         if self.dernier_calendrier:
             dernier = max(self.dernier_calendrier.values())
             self.bus.poser(topic_etat("dernier_calendrier"), datetime.fromtimestamp(dernier, self.tz).isoformat())
@@ -628,6 +648,9 @@ class App:
         await self.verifier_live()
         await self.verifier_secours()
         await self.verifier_fins()
+        if await self.archives.traiter(self.api, import_autorise=self.import_archives_autorise(),
+                                        maintenant=self.horloge()):
+            self.marquer()
 
     async def boucle_planif(self) -> None:
         await self.demarrage()

@@ -1,6 +1,7 @@
 # Tableau de bord « Basket » (URL : dashboard-basket), tel qu'exporté par l'éditeur de HA le 05/11/2026.
 # À coller dans : tableau de bord > crayon > ⋮ > Éditeur de configuration brute.
 # Visibilité par utilisateur : Francis c2af4c5a…, Ilona 7521abea… (user_id HA).
+# Ressource supplémentaire : /local/basket-historique-card.js?v=1.0.0 (module).
 # Ressource requise : /local/basket-a-venir-card.js?v=1.2.0 (module), copie de www/basket-a-venir-card.js.
 title: Basket
 views:
@@ -211,3 +212,19 @@ views:
               cellule(m, 'francis') }} |
 
               {% endfor %}{% endif %}
+
+  - title: Historique
+    path: historique
+    icon: mdi:history
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
+        column_span: 2
+        cards:
+          - type: custom:basket-entete-card
+            titre: Basket Live
+          - type: custom:basket-historique-card
+            capteur: sensor.basket_live_resultats_saison
+            grid_options:
+              columns: full

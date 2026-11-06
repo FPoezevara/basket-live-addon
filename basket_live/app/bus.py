@@ -38,6 +38,7 @@ APPAREIL = {
 # (composant, identifiant, attributs JSON ?, configuration propre)
 # Les entity_id découlent du nom d'appareil + nom d'entité : sensor.basket_live_matchs_a_venir, etc.
 ENTITES = [
+    ("sensor", "resultats_saison", True, {"name": "Résultats saison", "icon": "mdi:history"}),
     ("sensor", "notifications", True, {"name": "Notifications", "icon": "mdi:bell-clock"}),
     ("sensor", "matchs_a_venir", True, {"name": "Matchs à venir", "icon": "mdi:calendar-clock"}),
     ("sensor", "lives_en_cours", True, {"name": "Lives en cours", "icon": "mdi:basketball"}),
