@@ -31,6 +31,7 @@ Entités (appareil « Basket Live ») :
 |---|---|---|
 | `sensor.basket_live_matchs_a_venir` | nombre de matchs aujourd'hui et demain | `matchs` |
 | `sensor.basket_live_lives_en_cours` | nombre de lives (fin provisoire comprise) | `matchs` |
+| `sensor.basket_live_notifications` | nombre de tâches en attente, échéances futures comprises | `echeances` |
 | `sensor.basket_live_suivis_francis` | nombre de choix manuels actifs de Francis | `joueur`, `choix` (identifiant → booléen) |
 | `sensor.basket_live_suivis_ilona` | nombre de choix manuels actifs d’Ilona | `joueur`, `choix` (identifiant → booléen) |
 | `sensor.basket_live_resultats` | nombre de résultats sur `historique_jours` | `matchs` |
@@ -95,8 +96,7 @@ un statut V1 explicitement terminé et un score final inchangé sur deux lecture
 par `delai_fin`. Le nom des équipes doit correspondre après normalisation ; une ambiguïté,
 un match absent ou une erreur réseau ne constitue pas une preuve de fin.
 La confirmation publie le score final, retire le match des lives, calcule les pronostics et émet
-l'événement `fin` avec l'identifiant V2 habituel. Le package existant affiche alors le résultat
-sur le téléphone et ferme la notification après son délai de 30 minutes.
+l'événement `fin` avec l'identifiant V2 habituel. Le package affiche alors le résultat sur le téléphone. La fermeture 30 minutes après la fin confirmée repose sur une échéance persistante, reprise même après redémarrage.
 Les sources externes et le quota REST restent nécessaires à cette vérification ; aucun score
 final ni aucune fin ne sont inventés si les deux API sont indisponibles ou inexploitables.
 
@@ -135,10 +135,44 @@ Aucune requête SportsAPI n'est nécessaire pour un changement de sélection.
 
 Un choix fait en cours de match démarre immédiatement le live. L'arrêt ferme uniquement la
 notification de ce match pour cette personne. À la fin, l'événement contient les destinataires
-avant leur nettoyage, puis les notifications suivent le délai de fermeture existant de 30 minutes.
+avant leur nettoyage, puis les notifications suivent une échéance persistante de fermeture 30 minutes après la fin confirmée.
 Les deux anciens `input_text.basket_suivi_<joueur>_id` restent seulement pour migrer le choix
 unique existant ; ils sont vidés après confirmation, sans écraser un choix déjà fait avec les boutons.
 Les listes déroulantes et leurs anciennes automatisations sont supprimées.
 
 Installation : voir [homeassistant/INSTALLATION-LIVE.md](homeassistant/INSTALLATION-LIVE.md).
 Tests de la carte : `node --test tests/test_card_live.cjs`.
+
+## Échéances persistantes et rappels de pronostics (0.4.0)
+
+Chaque résultat confirmé programme une fermeture par personne à `termine_ts + 1800` dans
+`etat.json`. Le nouveau capteur `sensor.basket_live_notifications` publie les tâches en MQTT
+retenu. Home Assistant les relit au démarrage, à chaque changement de la file et toutes les
+minutes. Une tâche échue est traitée puis acquittée sur `basket_live/notification/ack` avec
+`{"cle": "..."}` (QoS 1, sans rétention). Les acquittements sont sauvegardés immédiatement.
+Un redémarrage ne décale donc pas l'échéance. La mise à jour reprend aussi les fermetures
+oubliées pour les résultats présents dans l'ancien état. Les notifications mobiles restent
+soumises au fonctionnement normal de l'application compagnon et du téléphone.
+
+Les rappels sont préparés à partir de deux heures avant le début, indépendamment du suivi Live.
+Pour chaque joueur, les rencontres de toutes les compétitions au même horaire affiché (minute)
+forment un seul groupe. Le groupe contient uniquement ses matchs sans pronostic. Exemple :
+Roanne - Saint-Quentin et Cholet - Paris à 18 h donnent à 16 h un seul rappel pour Francis,
+avec uniquement les rencontres qu'il n'a pas pronostiquées ; Ilona a son propre groupe.
+Le rappel ouvre l'onglet Direct, où se trouvent les boutons de pronostic.
+
+La préparation utilise l'état local des pronostics, sans requête SportsAPI. Home Assistant
+revérifie les menus avant l'envoi. Tant qu'un rappel n'est pas acquitté, son contenu est mis
+à jour si un pronostic est fait et il est annulé s'il ne reste aucun match. Un changement
+d'horaire crée un groupe correspondant au nouvel horaire ; les rencontres reportées ou
+annulées sont exclues. Une fois acquitté, un groupe personne/horaire n'est pas renvoyé,
+même si un autre match est découvert au même horaire ou si un pronostic est annulé ensuite.
+
+Si Home Assistant ou l'add-on est indisponible à H-2, un rappel est rattrapé au retour,
+uniquement avant le début du match. Un tag stable par horaire permet à une retransmission
+éventuelle de remplacer la notification existante. En cas d'erreur d'envoi, la tâche reste
+à traiter ; un acquittement signifie que l'action Home Assistant a réussi, pas qu'une personne
+a lu la notification. Le protocole évite les doublons usuels ; il ne peut pas rendre atomiques
+l'envoi à un téléphone et la sauvegarde de son acquittement lors d'une coupure entre les deux.
+
+Voir [homeassistant/INSTALLATION-NOTIFICATIONS.md](homeassistant/INSTALLATION-NOTIFICATIONS.md).

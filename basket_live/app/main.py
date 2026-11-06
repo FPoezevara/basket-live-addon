@@ -21,6 +21,7 @@ import aiohttp
 from . import VERSION, config
 from .api import ESSENTIEL, FOND, Api
 from .secours import resultat_correspondant
+from .notifications import Notifications
 from .suivis import Suivis
 from .pronos import Pronos, ouvert, saison
 from .modele import (CODE_TERMINE, CODES_EN_COURS, Criteres, Match, actif, appliquer, categorie,
@@ -73,6 +74,7 @@ class App:
         self.fichier_etat = cfg.dossier_donnees / "etat.json"
         self.pronos = Pronos(cfg.joueurs, set(cfg.tournois_elite))
         self.suivis = Suivis(cfg.joueurs)
+        self.notifications = Notifications(cfg.joueurs)
         self.api.sur_compteur = self.sauver_etat
 
     # --- utilitaires ---------------------------------------------------------------------
@@ -96,7 +98,17 @@ class App:
         return any(actif(m, maintenant) for m in self.matchs.values())
 
     def sur_commande(self, topic: str, texte: str) -> None:
-        from .bus import COMMANDE
+        from .bus import COMMANDE, NOTIFICATION_ACK
+        if topic == NOTIFICATION_ACK:
+            try:
+                ack = json.loads(texte)
+            except (TypeError, ValueError):
+                return
+            if isinstance(ack, dict) and self.notifications.acquitter(ack.get("cle"), self.horloge()):
+                log.info("Notification acquittée : %s", ack["cle"])
+                self.marquer()
+                self.sauver_etat()
+            return
         if topic == COMMANDE:
             if texte.strip() == "rafraichir":
                 self.demande_rafraichir = True
@@ -119,6 +131,9 @@ class App:
             if m is not None and self.pronos.choisir(m, morceaux[2], texte.strip(), self.horloge()):
                 log.info("Pronostic de %s sur %s - %s : %s", morceaux[2], m.domicile, m.exterieur, texte.strip())
                 self.marquer()
+                self.actualiser_notifications()  # retirer immédiatement un rappel devenu inutile
+                if self.etat_modifie:
+                    self.sauver_etat()  # ne pas perdre un pronostic avant un redémarrage
             else:
                 log.info("Pronostic refusé (%s, %s) : match inconnu ou déjà commencé", topic, texte)
                 self.sale = True                            # republie l'état réel du menu
@@ -138,6 +153,7 @@ class App:
         self.dernier_calendrier = etat.get("dernier_calendrier", {})
         self.pronos.charger(etat.get("pronos", {}))
         self.suivis.charger(etat.get("suivis", {}))
+        self.notifications.charger(etat.get("notifications", {}))
         api = etat.get("api", {})
         self.api.restaurer(api.get("jour", ""), api.get("compteur", 0),
                            api.get("compteur_secours", 0), api.get("compteur_instantanes", 0))
@@ -152,6 +168,7 @@ class App:
             "dernier_calendrier": self.dernier_calendrier,
             "pronos": self.pronos.vers_dict(),
             "suivis": self.suivis.vers_dict(),
+            "notifications": self.notifications.vers_dict(),
             "api": {"jour": self.api.jour, "compteur": self.api.compteur,
                     "compteur_secours": self.api.compteur_secours,
                     "compteur_instantanes": self.api.compteur_instantanes},
@@ -213,11 +230,18 @@ class App:
             log.info("Pronostics de %s - %s : %s", m.domicile, m.exterieur, e["points"])
         self.resultats = [r for r in self.resultats if r.id != m.id]
         self.resultats.append(m)
+        self.actualiser_notifications()  # échéance sauvegardée avant l'émission non retenue de fin
         self.emettre("fin", m)
         self.suivis.retirer(m.id)
         self.marquer()
 
+    def actualiser_notifications(self) -> None:
+        if self.notifications.actualiser(list(self.matchs.values()), self.resultats, self.pronos, self.horloge()):
+            self.marquer()
+            self.sauver_etat()
+
     def publier(self) -> None:
+        self.actualiser_notifications()
         maintenant = self.horloge()
         jour = self.aujourdhui()
         jours = {jour, jour + timedelta(days=1)}
@@ -246,6 +270,9 @@ class App:
             self.bus.poser(topic_etat(objet), str(sum(choix.values())))
             self.bus.poser(topic_attributs(objet), json.dumps({"joueur": joueur, "choix": choix},
                                                              ensure_ascii=False))
+        echeances = self.notifications.attributs()
+        self.bus.poser(topic_etat("notifications"), str(len(echeances["echeances"])))
+        self.bus.poser(topic_attributs("notifications"), json.dumps(echeances, ensure_ascii=False))
         if self.dernier_calendrier:
             dernier = max(self.dernier_calendrier.values())
             self.bus.poser(topic_etat("dernier_calendrier"), datetime.fromtimestamp(dernier, self.tz).isoformat())

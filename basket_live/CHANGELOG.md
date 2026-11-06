@@ -1,5 +1,15 @@
 # Journal des versions
 
+## 0.4.0
+
+- Remplacement de l'attente de 30 minutes dans Home Assistant par des échéances persistées dans l'add-on et publiées en MQTT retenu. Home Assistant reprend les fermetures échues au démarrage et à chaque minute ; acquittement uniquement après traitement.
+- Reconstitution des fermetures manquantes pour les résultats de l'état 0.3.0, sans remettre à zéro leur délai.
+- Rappel personnel deux heures avant les matchs sans pronostic : un groupe par personne et horaire, regroupant toutes les compétitions suivies. Les rappels traités ne sont pas recréés après redémarrage.
+- Suppression ou mise à jour des rappels encore en attente après un pronostic, report ou changement d'horaire ; rattrapage après une interruption uniquement avant le début du match.
+- Tags stables pour remplacer une éventuelle retransmission et priorité des rappels sur le nettoyage d'anciens lives.
+- Sauvegarde immédiate des pronostics et des acquittements. Aucun appel REST SportsAPI supplémentaire.
+- Mise à jour du package Home Assistant requise ; carte JavaScript et dashboard inchangés.
+
 ## 0.3.0
 
 - Boutons Live blancs/orange dans la carte Aujourd'hui et demain (carte 1.2.0), avec choix indépendants pour Francis et Ilona et plusieurs matchs simultanés.

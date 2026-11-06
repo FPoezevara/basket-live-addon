@@ -72,6 +72,114 @@ script:
           qos: 1
           retain: false
 
+  basket_prono_rappeler:
+    alias: Basket - rappeler les pronostics manquants
+    mode: queued
+    max: 20
+    fields:
+      echeance:
+        description: Groupe personnel de matchs à pronostiquer au même horaire
+    sequence:
+      - condition: template
+        value_template: >-
+          {{ echeance.personne in ['francis', 'ilona']
+             and now().timestamp() < echeance.debut }}
+      - variables:
+          personne: "{{ echeance.personne }}"
+          # Vérification locale supplémentaire : un pronostic peut avoir été fait
+          # depuis la préparation du rappel par l'add-on.
+          restants: >-
+            {% set ns = namespace(l=[]) %}
+            {% for m in echeance.matchs %}
+              {% set menus = states.select
+                   | selectattr('attributes.joueur', 'defined')
+                   | selectattr('attributes.joueur', 'eq', echeance.personne)
+                   | selectattr('attributes.match_id', 'defined')
+                   | selectattr('attributes.match_id', 'eq', m.id) | list %}
+              {% set faits = menus | rejectattr('state', 'in', ['—', 'unknown', 'unavailable']) | list %}
+              {% if faits | count == 0 %}{% set ns.l = ns.l + [m] %}{% endif %}
+            {% endfor %}
+            {{ ns.l }}
+          heure: "{{ echeance.debut | timestamp_custom('%H:%M', true) }}"
+          etiquette: "basket_prono_{{ echeance.debut | int }}"
+      - condition: template
+        value_template: "{{ restants | count > 0 }}"
+      - variables:
+          titre: "{{ 'Pronostic à faire' if restants | count == 1 else 'Pronostics à faire' }} · {{ heure }}"
+          texte: >-
+            Tu n'as pas encore pronostiqué : {{ restants | map(attribute='titre') | join(' ; ') }}.
+            Pense à le faire avant le début à {{ heure }}.
+      - choose:
+          - conditions: "{{ personne == 'francis' }}"
+            sequence:
+              - action: notify.mobile_app_iphone_de_francis_2
+                data:
+                  title: "{{ titre }}"
+                  message: "{{ texte }}"
+                  data:
+                    tag: "{{ etiquette }}"
+                    group: basket-pronostics
+                    notification_icon: mdi:crystal-ball
+                    url: /dashboard-basket/direct
+          - conditions: "{{ personne == 'ilona' }}"
+            sequence:
+              - action: notify.mobile_app_sm_g998u1
+                data:
+                  title: "{{ titre }}"
+                  message: "{{ texte }}"
+                  data:
+                    tag: "{{ etiquette }}"
+                    group: basket-pronostics
+                    channel: Basket pronostics
+                    importance: default
+                    alert_once: true
+                    notification_icon: mdi:crystal-ball
+                    clickAction: /dashboard-basket/direct
+
+  basket_notification_executer:
+    alias: Basket - traiter une échéance persistante
+    mode: queued
+    max: 50
+    fields:
+      cle:
+        description: Identifiant de l'échéance publiée par l'add-on
+    sequence:
+      - variables:
+          # Relire la tâche actuelle, plutôt que réutiliser une copie potentiellement ancienne.
+          echeance: >-
+            {{ (state_attr('sensor.basket_live_notifications', 'echeances') or [])
+               | selectattr('cle', 'eq', cle) | first | default(none) }}
+      - condition: template
+        value_template: >-
+          {{ echeance is mapping and echeance.personne in ['francis', 'ilona']
+             and echeance.echeance <= now().timestamp() }}
+      - choose:
+          - conditions: "{{ echeance.type == 'fermeture' }}"
+            sequence:
+              - action: script.basket_live_clore
+                data:
+                  personne: "{{ echeance.personne }}"
+                  match_id: "{{ echeance.match_id }}"
+          - conditions: "{{ echeance.type == 'rappel_prono' }}"
+            sequence:
+              - action: script.basket_prono_rappeler
+                data:
+                  echeance: "{{ echeance }}"
+      # Une erreur de notification interrompt le script avant cet acquittement :
+      # la tâche reste alors disponible pour le prochain passage.
+      - action: mqtt.publish
+        data:
+          topic: basket_live/notification/ack
+          payload: "{{ {'cle': cle} | to_json }}"
+          qos: 1
+          retain: false
+      # Évite de retraiter la même tâche entre l'acquittement et la republication MQTT.
+      - wait_template: >-
+          {{ cle not in ((state_attr('sensor.basket_live_notifications', 'echeances') or [])
+             | map(attribute='cle') | list) }}
+        timeout: "00:00:05"
+        continue_on_timeout: true
+
   # Live : Live Activity sur l'iPhone de Francis, notification persistante
   # mise à jour sur place chez Ilona (Android 15, pas de Live Update).
   basket_live_pousser:
@@ -249,6 +357,15 @@ automation:
                                 'europe': 'resultats_europe'}.get(match.categorie) %}
                   {{ cle is not none and is_state('input_boolean.basket_' ~ repeat.item ~ '_' ~ cle, 'on') }}
             - choose:
+                # Un ancien événement fin reçu après l'échéance ne doit pas recréer le live.
+                - conditions: >-
+                    {{ final and suit_live
+                       and (as_timestamp(match.termine_le | default(none), 0) + 1800) <= now().timestamp() }}
+                  sequence:
+                    - action: script.basket_live_clore
+                      data:
+                        personne: "{{ p }}"
+                        match_id: "{{ match.id }}"
                 - conditions: "{{ type_evt == 'suivi_arrete' and concerne }}"
                   sequence:
                     - action: script.basket_live_clore
@@ -281,29 +398,33 @@ automation:
                   data:
                     value: ""
 
-  - id: basket_live_clore_apres_fin
-    alias: Basket - clore les lives 30 min après la fin
-    description: Retire la Live Activity et la notification d'Ilona une fois le score final lu
-    mode: parallel
-    max: 20
+  - id: basket_notifications_echeances
+    alias: Basket - échéances persistantes des notifications
+    description: Ferme les lives échus et traite les rappels de pronostics, y compris après un redémarrage
+    mode: single
+    max_exceeded: silent
     triggers:
-      - trigger: mqtt
-        topic: basket_live/evenement
+      - trigger: homeassistant
+        event: start
+      - trigger: state
+        entity_id: sensor.basket_live_notifications
+        attribute: echeances
+      - trigger: time_pattern
+        minutes: /1
     conditions:
       - condition: template
-        value_template: "{{ trigger.payload_json is defined and trigger.payload_json.type == 'fin' }}"
+        value_template: >-
+          {{ states('sensor.basket_live_notifications') not in ['unknown', 'unavailable'] }}
     actions:
-      - delay: "00:30:00"
       - repeat:
-          for_each:
-            - francis
-            - ilona
+          for_each: >-
+            {{ (state_attr('sensor.basket_live_notifications', 'echeances') or [])
+               | selectattr('echeance', 'le', now().timestamp()) | list }}
           sequence:
-            - action: script.basket_live_clore
+            - action: script.basket_notification_executer
               continue_on_error: true
               data:
-                personne: "{{ repeat.item }}"
-                match_id: "{{ trigger.payload_json.match.id }}"
+                cle: "{{ repeat.item.cle }}"
 
   - id: basket_live_migrer_suivi
     alias: Basket - migrer l'ancien choix de match

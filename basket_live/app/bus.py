@@ -21,6 +21,7 @@ log = logging.getLogger("mqtt")
 RACINE = "basket_live"
 DISPO = f"{RACINE}/statut"
 EVENEMENT = f"{RACINE}/evenement"
+NOTIFICATION_ACK = f"{RACINE}/notification/ack"
 COMMANDE = f"{RACINE}/commande"
 SUIVI_SET = f"{RACINE}/suivi/+/+/set"
 PRONO_SET = f"{RACINE}/prono/+/+/set"
@@ -37,6 +38,7 @@ APPAREIL = {
 # (composant, identifiant, attributs JSON ?, configuration propre)
 # Les entity_id découlent du nom d'appareil + nom d'entité : sensor.basket_live_matchs_a_venir, etc.
 ENTITES = [
+    ("sensor", "notifications", True, {"name": "Notifications", "icon": "mdi:bell-clock"}),
     ("sensor", "matchs_a_venir", True, {"name": "Matchs à venir", "icon": "mdi:calendar-clock"}),
     ("sensor", "lives_en_cours", True, {"name": "Lives en cours", "icon": "mdi:basketball"}),
     ("sensor", "resultats", True, {"name": "Résultats", "icon": "mdi:scoreboard"}),
@@ -118,7 +120,7 @@ class Bus:
             if message.topic.matches(STATUT_HA) and texte == "online":
                 log.info("Home Assistant redémarré : republication")
                 await self._publier_tout(client)
-            elif message.topic.matches(COMMANDE) or message.topic.matches(PRONO_SET) or message.topic.matches(SUIVI_SET):
+            elif message.topic.matches(COMMANDE) or message.topic.matches(NOTIFICATION_ACK) or message.topic.matches(PRONO_SET) or message.topic.matches(SUIVI_SET):
                 self.sur_commande(message.topic.value, texte)
 
     async def _vider(self, client: aiomqtt.Client) -> None:
@@ -152,6 +154,7 @@ class Bus:
                     log.info("Connecté à MQTT %s:%s", self.host, self.port)
                     await client.publish(DISPO, "online", qos=1, retain=True)
                     await client.subscribe(COMMANDE, qos=1)
+                    await client.subscribe(NOTIFICATION_ACK, qos=1)
                     await client.subscribe(STATUT_HA, qos=1)
                     await client.subscribe(PRONO_SET, qos=1)
                     await client.subscribe(SUIVI_SET, qos=1)
