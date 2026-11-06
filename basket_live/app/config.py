@@ -29,6 +29,7 @@ class Config:
     fuseau: str
     api_base: str
     ws_url: str
+    api_v1_base: str = "https://api.sportsapipro.com/v1"
 
 
 def charger() -> Config:
@@ -53,5 +54,6 @@ def charger() -> Config:
         dossier_donnees=dossier,
         fuseau=os.environ.get("TZ") or "Europe/Paris",
         api_base=os.environ.get("BASKET_API_BASE", "https://api.sportsapipro.com/v2/basketball"),
+        api_v1_base=os.environ.get("BASKET_API_V1_BASE", "https://api.sportsapipro.com/v1"),
         ws_url=os.environ.get("BASKET_WS_URL", "wss://api.sportsapipro.com/v2/basketball/ws"),
     )

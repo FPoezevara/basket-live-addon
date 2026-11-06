@@ -10,13 +10,16 @@ L'add-on ne fait que les données. Préférences, notifications, Live Activities
 |---|---|---|
 | 0 h 05, et au démarrage | 2 calendriers (aujourd'hui, demain) | Sélection des matchs suivis |
 | 12 h 05 et 17 h 05 | 1 calendrier | Horaires modifiés, reports |
-| 15 min avant un match suivi | 1 connexion WebSocket + 1 instantané live | Scores et statuts en temps réel |
+| 15 min avant un match suivi | 1 instantané live | Scores et statuts en temps réel |
 | 5 min après un « terminé » stable | 1 calendrier (pour toute la vague) | Confirmation du score final |
 | Match attendu ou en cours sans données récentes, même avec WebSocket connecté | `/api/live` toutes les 5 min au plus | Rattrapage, partagé entre les matchs, soumis au quota |
 | Rafraîchissement manuel | Calendriers et, si des matchs sont actifs, `/api/live` | Rattrapage immédiat (bouton limité à une fois toutes les 5 min) |
+| Après 90 min et 10 min sans changement de score/statut | Calendrier V1, toutes les 10 min au plus par date UTC | Secours de fin indépendant de V2, deux résultats identiques espacés de `delai_fin` |
 | WebSocket indisponible | `/api/live` toutes les 2 min | Mode secours |
 
 Le statut « terminé » peut osciller en fin de match (observé sur Chalon - Kalev le 4 novembre 2026 : terminé, pause, terminé). Un match n'est déclaré fini qu'après `delai_fin` secondes de statut stable et confirmation par le calendrier, avec au plus trois tentatives avant de se fier aux seules données live.
+
+Le WebSocket (connexion, abonnements et messages) ne consomme pas le quota REST et reste utilisable lorsque celui-ci est épuisé. Les vérifications V1 et V2 sont des requêtes REST et partagent le compteur local.
 
 Le quota n'étant pas exposé par l'API, l'add-on compte ses requêtes par jour UTC et garde une réserve de 15 % pour les confirmations de fin.
 
@@ -79,3 +82,30 @@ python -m pytest tests
 ```
 
 `tests/test_integration.py` rejoue une fin de match contre un faux serveur SportsAPI Pro et un vrai broker MQTT (amqtt).
+
+## Fin de match bloquée en V2
+
+La V2 peut continuer à publier un ancien score et un statut « en cours » après la fin réelle.
+À partir de 90 minutes après l'horaire prévu et de 10 minutes sans changement de score/statut, l'add-on vérifie aussi les résultats V1 par date UTC, au plus toutes les 10 minutes. Une confirmation déjà engagée est revérifiée même si la V2 se remet à changer.
+Il exige une correspondance unique des deux équipes et de l'horaire (15 minutes de tolérance),
+un statut V1 explicitement terminé et un score final inchangé sur deux lectures séparées
+par `delai_fin`. Le nom des équipes doit correspondre après normalisation ; une ambiguïté,
+un match absent ou une erreur réseau ne constitue pas une preuve de fin.
+La confirmation publie le score final, retire le match des lives, calcule les pronostics et émet
+l'événement `fin` avec l'identifiant V2 habituel. Le package existant affiche alors le résultat
+sur le téléphone et ferme la notification après son délai de 30 minutes.
+Les sources externes et le quota REST restent nécessaires à cette vérification ; aucun score
+final ni aucune fin ne sont inventés si les deux API sont indisponibles ou inexploitables.
+
+Le budget REST est partagé : avec `quota_jour: 100`, les appels de fond peuvent utiliser
+les 85 premières requêtes. Les 15 restantes sont réservées aux confirmations de fin.
+Une recherche V1 initiale est un appel de fond ; la seconde lecture confirmant un résultat
+V1 déjà trouvé est essentielle. Il n'existe aucun sous-plafond quotidien par endpoint.
+Un instantané V2 contient tous les matchs en cours ; un calendrier V1 couvre tous les matchs
+de la même date. Le nombre de matchs n'est donc pas limité par le nombre d'instantanés.
+Le coût est réservé et sauvegardé dans `etat.json` avant chaque appel HTTP, y compris pour
+une requête qui échoue ensuite. Un redémarrage ne recharge pas le budget quotidien.
+Un quota épuisé est journalisé : le WebSocket continue, mais les nouvelles vérifications
+REST doivent attendre le renouvellement du quota. Les appels effectués hors de l'add-on
+avec la même clé ne figurent pas dans ce compteur local ; un HTTP 429 bloque tous les
+nouveaux appels REST de l'add-on jusqu'au lendemain UTC.

@@ -123,9 +123,15 @@ class Bus:
             self.evenements.popleft()
         for topic in list(self.a_publier):
             payload = self.retenus[topic]
-            await client.publish(topic, payload, qos=1, retain=True)
+            # Une nouvelle valeur peut arriver pendant l'attente MQTT : elle doit rester à publier.
             self.a_publier.discard(topic)
-            if payload == "":
+            try:
+                await client.publish(topic, payload, qos=1, retain=True)
+            except BaseException:
+                self.a_publier.add(topic)
+                self.signal.set()
+                raise
+            if payload == "" and self.retenus.get(topic) == payload:
                 del self.retenus[topic]                 # retenu effacé chez le broker : inutile de le garder
 
     async def run(self) -> None:

@@ -27,13 +27,19 @@ class FausseApi(Api):
         self.calendriers = calendriers or {}
         self.live_ev = live or []
         self.appels = []
+        self.secours = {}
 
     async def calendrier(self, jour, priorite="fond"):
         self.appels.append(("calendrier", jour, priorite))
         self.compter()
         return self.calendriers.get(jour, [])
 
-    async def live(self, priorite="fond"):
+    async def calendrier_secours(self, jour, priorite="fond"):
+        self.appels.append(("secours", jour, priorite))
+        self.compter()
+        return self.secours.get(jour, [])
+
+    async def live(self, priorite="fond", *, automatique=False):
         self.appels.append(("live", priorite))
         self.compter()
         return self.live_ev

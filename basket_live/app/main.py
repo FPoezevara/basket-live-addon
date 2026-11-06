@@ -1,7 +1,7 @@
 """Orchestrateur : calendrier, WebSocket, confirmation des fins de match, publication MQTT.
 
 Budget de requêtes d'une journée type : 2 calendriers à 0 h 05, 1 à 12 h 05 et 17 h 05,
-1 connexion WebSocket + 1 instantané live par fenêtre de match, 1 calendrier par vague de
+WebSocket hors quota REST ; 1 instantané live par fenêtre de match, 1 calendrier par vague de
 fins de match. En cas de données manquantes, un instantané de secours toutes les 5 min
 au plus, partagé entre les matchs et soumis au quota de fond.
 """
@@ -20,6 +20,7 @@ import aiohttp
 
 from . import VERSION, config
 from .api import ESSENTIEL, FOND, Api
+from .secours import resultat_correspondant
 from .pronos import Pronos, ouvert, saison
 from .modele import (CODE_TERMINE, CODES_EN_COURS, Criteres, Match, actif, appliquer, categorie,
                      construire_match, date_locale, entier, finaliser, maj_statique, normaliser, vue)
@@ -37,6 +38,9 @@ REESSAI_FIN = 180        # s entre deux tentatives de confirmation d'une fin de 
 ESSAIS_FIN_MAX = 3       # au-delà, la fin est validée sur les seules données du WebSocket
 DONNEES_RECENTES = 900   # s : en deçà, le calendrier ne contredit pas le live
 PERIODE_PLANIF = 30
+VERIF_SECOURS_MIN = 600  # s entre deux calendriers V1 pour confirmer les fins
+SILENCE_SECOURS = 600    # s sans changement de score/statut avant de vérifier la fin en V1
+AGE_VERIF_SECOURS = 90 * 60  # début des vérifications indépendantes après 90 min
 ATTENTE_INACTIF = 20     # s entre deux vérifications du besoin de WebSocket
 
 
@@ -57,6 +61,7 @@ class App:
         self.dernier_calendrier: dict[str, float] = {}
         self.dernier_instantane = 0.0
         self.verrou_instantane = asyncio.Lock()
+        self.dernier_secours: dict[str, float] = {}
         self.ws_connecte = False
         self.demande_rafraichir = False
         self.dernier_rafraichir_manuel = 0.0
@@ -65,6 +70,7 @@ class App:
         self.etat_modifie = False
         self.fichier_etat = cfg.dossier_donnees / "etat.json"
         self.pronos = Pronos(cfg.joueurs, set(cfg.tournois_elite))
+        self.api.sur_compteur = self.sauver_etat
 
     # --- utilitaires ---------------------------------------------------------------------
 
@@ -74,6 +80,13 @@ class App:
     def marquer(self) -> None:
         self.sale = True
         self.etat_modifie = True
+        maintenant = self.horloge()
+        for m in self.matchs.values():
+            empreinte = [m.code, m.score_dom, m.score_ext]
+            if m.progression_etat != empreinte:
+                m.progression_ts = (maintenant if m.progression_etat is not None
+                                    else min(maintenant, m.maj_ts or m.debut_ts))
+                m.progression_etat = empreinte
 
     def ws_utile(self) -> bool:
         maintenant = self.horloge()
@@ -111,7 +124,8 @@ class App:
         self.dernier_calendrier = etat.get("dernier_calendrier", {})
         self.pronos.charger(etat.get("pronos", {}))
         api = etat.get("api", {})
-        self.api.restaurer(api.get("jour", ""), api.get("compteur", 0))
+        self.api.restaurer(api.get("jour", ""), api.get("compteur", 0),
+                           api.get("compteur_secours", 0), api.get("compteur_instantanes", 0))
         log.info("État restauré : %s matchs suivis, %s résultats", len(self.matchs), len(self.resultats))
 
     def sauver_etat(self) -> None:
@@ -122,7 +136,9 @@ class App:
             "resultats": [asdict(m) for m in self.resultats],
             "dernier_calendrier": self.dernier_calendrier,
             "pronos": self.pronos.vers_dict(),
-            "api": {"jour": self.api.jour, "compteur": self.api.compteur},
+            "api": {"jour": self.api.jour, "compteur": self.api.compteur,
+                    "compteur_secours": self.api.compteur_secours,
+                    "compteur_instantanes": self.api.compteur_instantanes},
         }
         tmp = self.fichier_etat.with_suffix(".tmp")
         tmp.write_text(json.dumps(etat, ensure_ascii=False), encoding="utf-8")
@@ -303,6 +319,64 @@ class App:
                 log.warning("Fin de %s non confirmée par le calendrier, validée sur les données live", m.id)
                 self.finaliser(m)
 
+    async def verifier_secours(self) -> None:
+        """Confirme les fins via V1 même si le WebSocket et les calendriers V2 restent figés.
+
+        On ne termine jamais un match sur son âge ou sur son absence d'une liste.
+        Deux résultats V1 identiques, séparés d'au moins delai_fin, sont requis.
+        """
+        maintenant = self.horloge()
+        candidats = [m for m in self.matchs.values()
+                     if not m.termine and maintenant >= m.debut_ts + AGE_VERIF_SECOURS
+                     and (m.fin_secours_ts is not None
+                          or maintenant - (m.progression_ts or m.maj_ts or m.debut_ts) >= SILENCE_SECOURS)]
+        jours = {datetime.fromtimestamp(m.debut_ts, ZoneInfo("UTC")).date().isoformat()
+                 for m in candidats}
+        for jour in sorted(jours):
+            if maintenant - self.dernier_secours.get(jour, 0) < VERIF_SECOURS_MIN:
+                continue
+            # Une première recherche reste en fond. Seule une preuve de fin V1 déjà
+            # obtenue justifie de prendre dans la réserve pour sa confirmation.
+            confirmation = any(m.fin_secours_ts is not None
+                               and datetime.fromtimestamp(m.debut_ts, ZoneInfo("UTC")).date().isoformat() == jour
+                               for m in candidats)
+            priorite = ESSENTIEL if confirmation else FOND
+            if not self.api.disponible(priorite):
+                continue
+            self.dernier_secours[jour] = maintenant
+            evenements = await self.api.calendrier_secours(jour, priorite)
+            if evenements is None:
+                continue  # une panne ne constitue jamais une confirmation
+            for m in candidats:
+                if m.termine or datetime.fromtimestamp(m.debut_ts, ZoneInfo("UTC")).date().isoformat() != jour:
+                    continue
+                resultat = resultat_correspondant(m, evenements)
+                if resultat is None:
+                    # Match absent, ambigu, encore en cours ou sans score final exploitable.
+                    if m.fin_secours_ts is not None:
+                        m.fin_secours_ts = None
+                        m.fin_secours_resultat = None
+                        self.marquer()
+                    continue
+                if m.fin_secours_resultat != list(resultat) or m.fin_secours_ts is None:
+                    m.fin_secours_resultat = list(resultat)
+                    m.fin_secours_ts = maintenant
+                    log.info("Fin V1 à confirmer pour %s : %s - %s", m.id, resultat[1], resultat[2])
+                    self.marquer()
+                    continue
+                if maintenant - m.fin_secours_ts < self.cfg.delai_fin:
+                    continue
+                _, dom, ext = resultat
+                # Les quarts V2 peuvent être incomplets ; ne pas présenter leurs totaux comme définitifs.
+                if sum(v or 0 for v in m.periodes_dom) != dom:
+                    m.periodes_dom = [None] * 4
+                if sum(v or 0 for v in m.periodes_ext) != ext:
+                    m.periodes_ext = [None] * 4
+                appliquer(m, {"homeScore.current": dom, "awayScore.current": ext}, maintenant,
+                          scores_seulement=True)
+                log.warning("Fin confirmée par V1 pour %s : %s - %s (identifiant V2 conservé)", m.id, dom, ext)
+                self.finaliser(m)
+
     # --- live ----------------------------------------------------------------------------
 
     def appliquer_live(self, evenements: list[dict]) -> None:
@@ -325,13 +399,14 @@ class App:
                     self.emettre(e, m)
         self.marquer()
 
-    async def instantane(self, priorite: str = FOND) -> None:
+    async def instantane(self, priorite: str = FOND, *, automatique: bool = False) -> None:
         # Une reconnexion et l'ordonnanceur peuvent demander le même rattrapage.
         if self.verrou_instantane.locked():
             return
         async with self.verrou_instantane:
             self.dernier_instantane = self.horloge()
-            evenements = await self.api.live(priorite)
+            evenements = (await self.api.live(priorite, automatique=True) if automatique
+                          else await self.api.live(priorite))
             if evenements is not None:
                 log.info("Instantané live : %s matchs reçus", len(evenements))
                 self.appliquer_live(evenements)
@@ -347,7 +422,7 @@ class App:
         if muets and self.api.disponible(FOND):
             log.warning("Rattrapage live : matchs sans données récentes %s (WebSocket %s)",
                         [m.id for m in muets], "connecté" if self.ws_connecte else "déconnecté")
-            await self.instantane()
+            await self.instantane(automatique=True)
 
     def traiter_ws(self, msg: dict) -> None:
         type_ = msg.get("type")
@@ -393,47 +468,43 @@ class App:
                     await asyncio.sleep(ATTENTE_INACTIF)
                     attente = 5
                     continue
-                if self.api.disponible(FOND):
-                    self.api.compter()                  # une connexion compte pour une requête
-                    connexion = self.horloge()
-                    try:
-                        async with session.ws_connect(self.api.url_ws(), heartbeat=None) as ws:
-                            await ws.send_json({"action": "subscribe", "channel": "live-scores"})
-                            self.ws_etat(True)
-                            log.info("WebSocket connecté")
-                            if self.horloge() - self.dernier_instantane >= INSTANTANE_MIN:
-                                asyncio.create_task(self.instantane())
-                            pinger = asyncio.create_task(self._pinger(ws))
-                            try:
-                                while True:
-                                    msg = await ws.receive(timeout=SILENCE_WS)
-                                    if msg.type == aiohttp.WSMsgType.TEXT:
-                                        try:
-                                            self.traiter_ws(json.loads(msg.data))
-                                        except ValueError:
-                                            log.debug("Message non JSON ignoré")
-                                    elif msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED,
-                                                      aiohttp.WSMsgType.CLOSING, aiohttp.WSMsgType.ERROR):
-                                        log.warning("WebSocket fermé par le serveur (%s)", msg.type)
-                                        break
-                                    if not self.ws_utile():
-                                        log.info("Plus de match actif : déconnexion du WebSocket")
-                                        break
-                            finally:
-                                pinger.cancel()
-                    except TimeoutError:
-                        log.warning("WebSocket silencieux depuis %s s : reconnexion", SILENCE_WS)
-                    except aiohttp.ClientError as e:
-                        log.warning("WebSocket indisponible : %s", e)
-                    finally:
-                        self.ws_etat(False)
-                    if self.horloge() - connexion > 120:
-                        attente = 5                     # connexion qui a tenu : reprise rapide
-                else:
-                    log.warning("Quota de fond atteint : pas de connexion WebSocket")
+                connexion = self.horloge()
+                try:
+                    async with session.ws_connect(self.api.url_ws(), heartbeat=None) as ws:
+                        await ws.send_json({"action": "subscribe", "channel": "live-scores"})
+                        self.ws_etat(True)
+                        log.info("WebSocket connecté")
+                        if self.horloge() - self.dernier_instantane >= INSTANTANE_MIN:
+                            asyncio.create_task(self.instantane(automatique=True))
+                        pinger = asyncio.create_task(self._pinger(ws))
+                        try:
+                            while True:
+                                msg = await ws.receive(timeout=SILENCE_WS)
+                                if msg.type == aiohttp.WSMsgType.TEXT:
+                                    try:
+                                        self.traiter_ws(json.loads(msg.data))
+                                    except ValueError:
+                                        log.debug("Message non JSON ignoré")
+                                elif msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED,
+                                                  aiohttp.WSMsgType.CLOSING, aiohttp.WSMsgType.ERROR):
+                                    log.warning("WebSocket fermé par le serveur (%s)", msg.type)
+                                    break
+                                if not self.ws_utile():
+                                    log.info("Plus de match actif : déconnexion du WebSocket")
+                                    break
+                        finally:
+                            pinger.cancel()
+                except TimeoutError:
+                    log.warning("WebSocket silencieux depuis %s s : reconnexion", SILENCE_WS)
+                except aiohttp.ClientError as e:
+                    log.warning("WebSocket indisponible : %s", e)
+                finally:
+                    self.ws_etat(False)
+                if self.horloge() - connexion > 120:
+                    attente = 5                     # connexion qui a tenu : reprise rapide
                 if self.ws_utile() and self.horloge() - self.dernier_instantane >= SECOURS_MIN \
                         and self.api.disponible(FOND):
-                    await self.instantane()
+                    await self.instantane(automatique=True)
                 await asyncio.sleep(attente)
                 attente = min(attente * 2, 300)
         finally:
@@ -493,6 +564,7 @@ class App:
                 await self.rafraichir(j)
 
         await self.verifier_live()
+        await self.verifier_secours()
         await self.verifier_fins()
 
     async def boucle_planif(self) -> None:
@@ -544,7 +616,7 @@ async def principal() -> None:
     if not cfg.api_key:
         log.error("Clé API absente : la renseigner dans la configuration de l'add-on")
         raise SystemExit(1)
-    api = Api(cfg.api_key, cfg.api_base, cfg.ws_url, cfg.quota_jour)
+    api = Api(cfg.api_key, cfg.api_base, cfg.ws_url, cfg.quota_jour, cfg.api_v1_base)
     app = App(cfg, api)
     arret = asyncio.Event()
     boucle = asyncio.get_running_loop()

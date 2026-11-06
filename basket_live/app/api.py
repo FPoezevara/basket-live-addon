@@ -1,7 +1,7 @@
 """Client REST SportsAPI Pro V2 avec comptage des requêtes.
 
 L'API n'expose pas le quota consommé : on compte nous-mêmes, par jour UTC. Deux priorités :
-« fond » (calendrier, connexion WebSocket, instantané live) s'arrête avant la réserve,
+« fond » (calendrier, instantané live) s'arrête avant la réserve,
 « essentiel » (confirmation des fins de match) peut l'entamer.
 """
 
@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from urllib.parse import quote
+from typing import Callable
 
 import aiohttp
 
@@ -20,15 +21,20 @@ ESSENTIEL = "essentiel"
 
 
 class Api:
-    def __init__(self, cle: str, base: str, ws_url: str, quota: int):
+    def __init__(self, cle: str, base: str, ws_url: str, quota: int,
+                 base_v1: str = "https://api.sportsapipro.com/v1"):
         self.cle = cle
         self.base = base.rstrip("/")
         self.ws_base = ws_url
+        self.base_v1 = base_v1.rstrip("/")
         self.quota = quota
         self.reserve = max(10, quota * 15 // 100)
         self.jour = self._jour()
         self.compteur = 0
+        self.compteur_secours = 0
+        self.compteur_instantanes = 0
         self.session: aiohttp.ClientSession | None = None
+        self.sur_compteur: Callable[[], None] | None = None
 
     @staticmethod
     def _jour() -> str:
@@ -38,6 +44,7 @@ class Api:
         jour = self._jour()
         if jour != self.jour:
             self.jour, self.compteur = jour, 0
+            self.compteur_secours = self.compteur_instantanes = 0
 
     def disponible(self, priorite: str = FOND) -> bool:
         self._remise_a_zero()
@@ -47,10 +54,15 @@ class Api:
     def compter(self) -> None:
         self._remise_a_zero()
         self.compteur += 1
+        if self.sur_compteur:
+            self.sur_compteur()  # réserve persistée avant l’envoi HTTP
 
-    def restaurer(self, jour: str, compteur: int) -> None:
+    def restaurer(self, jour: str, compteur: int, compteur_secours: int = 0,
+                  compteur_instantanes: int = 0) -> None:
         if jour == self._jour():
             self.jour, self.compteur = jour, int(compteur)
+            self.compteur_secours = max(0, int(compteur_secours))
+            self.compteur_instantanes = max(0, int(compteur_instantanes))
 
     def url_ws(self) -> str:
         return f"{self.ws_base}?x-api-key={quote(self.cle)}"
@@ -65,16 +77,18 @@ class Api:
         if self.session:
             await self.session.close()
 
-    async def get(self, chemin: str, priorite: str = FOND) -> dict | None:
+    async def get(self, chemin: str, priorite: str = FOND, *, base: str | None = None) -> dict | None:
         if not self.disponible(priorite):
             log.warning("Quota local atteint (%s/%s), requête %s non envoyée", self.compteur, self.quota, chemin)
             return None
         self.compter()
         try:
-            async with self.session.get(f"{self.base}{chemin}") as rep:
+            async with self.session.get(f"{base or self.base}{chemin}") as rep:
                 if rep.status == 429:
                     log.error("429 sur %s : quota de l'API épuisé, arrêt des requêtes jusqu'à minuit UTC", chemin)
                     self.compteur = self.quota
+                    if self.sur_compteur:
+                        self.sur_compteur()
                     return None
                 if rep.status != 200:
                     log.warning("HTTP %s sur %s", rep.status, chemin)
@@ -93,8 +107,27 @@ class Api:
             return None
         return rep["events"]
 
-    async def live(self, priorite: str = FOND) -> list[dict] | None:
+    async def live(self, priorite: str = FOND, *, automatique: bool = False) -> list[dict] | None:
+        if not self.disponible(priorite):
+            return None
+        if automatique:
+            self.compteur_instantanes += 1  # diagnostic uniquement, sans sous-plafond
         rep = await self.get("/api/live", priorite)
         if rep is None or not isinstance(rep.get("events"), list):
             return None
         return rep["events"]
+
+    async def calendrier_secours(self, jour: str, priorite: str = FOND) -> list[dict] | None:
+        # Requête par date UTC : inclut les matchs terminés, y compris après minuit.
+        # Tous les appels V1 et V2 partagent le même compteur REST local.
+        if not self.disponible(priorite):
+            return None
+        self.compteur_secours += 1  # diagnostic uniquement, sans sous-plafond
+        rep = await self.get(f"/games?startDate={jour}&endDate={jour}&sportId=2", priorite,
+                             base=self.base_v1)
+        if not isinstance(rep, dict) or rep.get("success") is False:
+            return None
+        data = rep.get("data", rep)
+        if not isinstance(data, dict) or not isinstance(data.get("games"), list):
+            return None
+        return data["games"]

@@ -117,6 +117,10 @@ class Match:
     tardif: bool = False
     maj_ts: float | None = None
     source_ts: float | None = None
+    fin_secours_ts: float | None = None
+    fin_secours_resultat: list[int] | None = None
+    progression_etat: list[int | None] | None = None
+    progression_ts: float | None = None
     dernier_push_ts: float = 0.0
     push_en_attente: bool = False
 
