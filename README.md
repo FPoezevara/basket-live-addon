@@ -12,6 +12,8 @@ L'add-on ne fait que les données. Préférences, notifications, Live Activities
 | 12 h 05 et 17 h 05 | 1 calendrier | Horaires modifiés, reports |
 | 15 min avant un match suivi | 1 connexion WebSocket + 1 instantané live | Scores et statuts en temps réel |
 | 5 min après un « terminé » stable | 1 calendrier (pour toute la vague) | Confirmation du score final |
+| Match attendu ou en cours sans données récentes, même avec WebSocket connecté | `/api/live` toutes les 5 min au plus | Rattrapage, partagé entre les matchs, soumis au quota |
+| Rafraîchissement manuel | Calendriers et, si des matchs sont actifs, `/api/live` | Rattrapage immédiat (bouton limité à une fois toutes les 5 min) |
 | WebSocket indisponible | `/api/live` toutes les 2 min | Mode secours |
 
 Le statut « terminé » peut osciller en fin de match (observé sur Chalon - Kalev le 4 novembre 2026 : terminé, pause, terminé). Un match n'est déclaré fini qu'après `delai_fin` secondes de statut stable et confirmation par le calendrier, avec au plus trois tentatives avant de se fier aux seules données live.

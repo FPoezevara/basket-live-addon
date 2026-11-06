@@ -2,7 +2,8 @@
 
 Budget de requêtes d'une journée type : 2 calendriers à 0 h 05, 1 à 12 h 05 et 17 h 05,
 1 connexion WebSocket + 1 instantané live par fenêtre de match, 1 calendrier par vague de
-fins de match. Loin des 100 de l'offre gratuite, même un soir chargé.
+fins de match. En cas de données manquantes, un instantané de secours toutes les 5 min
+au plus, partagé entre les matchs et soumis au quota de fond.
 """
 
 from __future__ import annotations
@@ -29,7 +30,8 @@ log = logging.getLogger("basket_live")
 CRENEAUX = [(heure(0, 5), True), (heure(12, 5), False), (heure(17, 5), False)]
 SILENCE_WS = 75          # s sans aucun message (pong compris) avant de considérer la connexion morte
 PING_WS = 30
-INSTANTANE_MIN = 300     # s entre deux instantanés /api/live après (re)connexion
+INSTANTANE_MIN = 300     # s entre deux instantanés /api/live automatiques
+SILENCE_MATCH = 300      # s sans changement du match avant de vérifier /api/live
 SECOURS_MIN = 120        # s entre deux interrogations /api/live quand le WebSocket est indisponible
 REESSAI_FIN = 180        # s entre deux tentatives de confirmation d'une fin de match
 ESSAIS_FIN_MAX = 3       # au-delà, la fin est validée sur les seules données du WebSocket
@@ -54,6 +56,7 @@ class App:
         self.resultats: list[Match] = []
         self.dernier_calendrier: dict[str, float] = {}
         self.dernier_instantane = 0.0
+        self.verrou_instantane = asyncio.Lock()
         self.ws_connecte = False
         self.demande_rafraichir = False
         self.dernier_rafraichir_manuel = 0.0
@@ -323,10 +326,28 @@ class App:
         self.marquer()
 
     async def instantane(self, priorite: str = FOND) -> None:
-        self.dernier_instantane = self.horloge()
-        evenements = await self.api.live(priorite)
-        if evenements is not None:
-            self.appliquer_live(evenements)
+        # Une reconnexion et l'ordonnanceur peuvent demander le même rattrapage.
+        if self.verrou_instantane.locked():
+            return
+        async with self.verrou_instantane:
+            self.dernier_instantane = self.horloge()
+            evenements = await self.api.live(priorite)
+            if evenements is not None:
+                log.info("Instantané live : %s matchs reçus", len(evenements))
+                self.appliquer_live(evenements)
+
+    async def verifier_live(self) -> None:
+        maintenant = self.horloge()
+        if maintenant - self.dernier_instantane < INSTANTANE_MIN:
+            return
+        muets = [m for m in self.matchs.values()
+                 if actif(m, maintenant) and m.debut_ts <= maintenant
+                 and m.code != CODE_TERMINE
+                 and (m.code == 0 or maintenant - (m.maj_ts or 0) >= SILENCE_MATCH)]
+        if muets and self.api.disponible(FOND):
+            log.warning("Rattrapage live : matchs sans données récentes %s (WebSocket %s)",
+                        [m.id for m in muets], "connecté" if self.ws_connecte else "déconnecté")
+            await self.instantane()
 
     def traiter_ws(self, msg: dict) -> None:
         type_ = msg.get("type")
@@ -451,6 +472,9 @@ class App:
                 self.dernier_rafraichir_manuel = maintenant
                 await self.rafraichir(jour)
                 await self.rafraichir(jour + timedelta(days=1))
+                if self.ws_utile():
+                    log.info("Rafraîchissement manuel : récupération des scores live")
+                    await self.instantane()
             else:
                 log.info("Rafraîchissement manuel ignoré (moins de 5 min depuis le précédent)")
 
@@ -468,6 +492,7 @@ class App:
             if maintenant - self.dernier_calendrier.get(j.isoformat(), 0) > 3600:
                 await self.rafraichir(j)
 
+        await self.verifier_live()
         await self.verifier_fins()
 
     async def boucle_planif(self) -> None:

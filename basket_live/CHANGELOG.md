@@ -1,5 +1,12 @@
 # Journal des versions
 
+## 0.2.2
+
+- Rattrapage des matchs sans données récentes par un instantané live, même si le WebSocket reste connecté (une requête partagée toutes les 5 min au plus, dans la limite du quota).
+- Le rafraîchissement manuel du calendrier récupère aussi les scores si des matchs sont actifs.
+- Les mises à jour portant un horodatage source ancien ne sont plus considérées comme fraîches ; les messages antérieurs à un horodatage déjà reçu sont ignorés.
+- Journalisation des instantanés live et des rattrapages ; protection contre les requêtes live simultanées.
+
 ## 0.2.1
 
 - Nouveau barème des pronostics : 3 points pour Nanterre en Betclic Élite, 2 pour Nanterre dans une autre compétition et pour un match d'Élite sans Nanterre, 1 pour les autres.

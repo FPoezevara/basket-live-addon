@@ -116,6 +116,7 @@ class Match:
     termine_ts: float | None = None
     tardif: bool = False
     maj_ts: float | None = None
+    source_ts: float | None = None
     dernier_push_ts: float = 0.0
     push_en_attente: bool = False
 
@@ -309,6 +310,14 @@ def appliquer(m: Match, plat: dict, maintenant: float, scores_seulement: bool = 
     """
     if m.termine:
         return []
+    # L'heure du changement décrit la fraîcheur des données ; celle de réception
+    # ne doit pas rendre récent un événement rejoué. Le timestamp du chrono,
+    # lui, peut rester ancien pendant une pause : il ne date pas tout le match.
+    source = entier(plat.get("changes.changeTimestamp"))
+    if not scores_seulement and source is not None:
+        if m.source_ts is not None and source < m.source_ts:
+            return []
+        m.source_ts = min(float(source), maintenant)
     evts: list[str] = []
     change = False
     score_change = False
@@ -388,7 +397,7 @@ def appliquer(m: Match, plat: dict, maintenant: float, scores_seulement: bool = 
     if score_change and m.code in CODES_EN_COURS | {CODE_TERMINE}:
         m.push_en_attente = True
     if change:
-        m.maj_ts = maintenant
+        m.maj_ts = min(float(source), maintenant) if source is not None else maintenant
     return evts
 
 
