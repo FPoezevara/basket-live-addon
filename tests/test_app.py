@@ -282,3 +282,63 @@ def test_pronos_des_resultats_complets_sans_limite_de_50_ni_divulgation_future(t
     app.publier()
     futur = json.loads(bus.retenus['basket_live/matchs_a_venir/attributs'])['matchs'][0]
     assert 'pronostics' not in futur
+
+
+def test_classements_selection_persistance_et_budget(tmp_path):
+    api = FausseApi()
+    h = Horloge(T)
+    app, bus = faire_app(tmp_path, api, h)
+    nanterre = app.cfg.equipe_nanterre
+
+    def groupe(nom, ids, type_tableau="total"):
+        return {"name": nom, "type": type_tableau, "rows": [
+            {"position": i + 1, "team": {"id": identifiant, "name": "Nanterre" if identifiant == nanterre else str(identifiant)},
+             "matches": 4, "wins": 3, "losses": 1, "scoresFor": 325, "scoresAgainst": 307, "points": 7}
+            for i, identifiant in enumerate(ids)
+        ]}
+
+    async def saisons(tournoi):
+        api.appels.append(("saisons", tournoi))
+        api.compter()
+        return {"data": {"seasons": [{"id": 1, "year": "25/26"}, {"id": 2, "year": "26/27"}]}}
+
+    async def classement(tournoi, sid):
+        api.appels.append(("classement", tournoi, sid))
+        api.compter()
+        if h.t > T:
+            return None
+        if tournoi == 156:
+            return {"standings": [groupe("Saison régulière", [nanterre, *range(1, 16)])]}
+        return {"data": {"standings": [
+            groupe("Groupe A", [1, 2, 3, 4]),
+            groupe("Groupe B", [5, nanterre, 6, 7]),
+            groupe("Groupe B", [5, nanterre, 6, 7], "home"),
+        ]}}
+
+    api.saisons_tournoi = saisons
+    api.classement_tournoi = classement
+    for _ in range(6):
+        asyncio.run(app.rafraichir_classements())
+    assert api.appels == [("saisons", 156), ("classement", 156, 2), ("saisons", 9357), ("classement", 9357, 2)]
+    app.publier()
+    attrs = json.loads(bus.retenus["basket_live/classements_competitions/attributs"])
+    assert len(attrs["tableaux"]["elite"]["equipes"]) == 16
+    bcl = attrs["tableaux"]["bcl"]
+    assert bcl["groupe"] == "Groupe B" and len(bcl["equipes"]) == 4
+    assert bcl["equipes"][1]["nanterre"] and bcl["equipes"][1]["difference"] == 18
+    assert bcl["equipes"][1]["pourcentage"] == 75
+
+    app, _ = faire_app(tmp_path, api, h)
+    app.charger_etat()
+    asyncio.run(app.rafraichir_classements())
+    assert len(api.appels) == 4
+    h.t += 86400
+    api.compteur = 65
+    asyncio.run(app.rafraichir_classements())
+    assert len(api.appels) == 4
+    api.compteur = 4
+    asyncio.run(app.rafraichir_classements())
+    asyncio.run(app.rafraichir_classements())
+    assert len(api.appels) == 6
+    assert app.classements["tableaux"]["bcl"]["mis_a_jour"] == bcl["mis_a_jour"]
+    assert app.classements["tableaux"]["bcl"]["equipes"] == bcl["equipes"]

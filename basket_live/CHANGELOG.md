@@ -1,5 +1,11 @@
 # Journal des versions
 
+## 0.7.0
+
+- Onglet Classements avec la Betclic Élite complète et la poule de Nanterre en BCL. La ligne de Nanterre est mise en évidence dans chaque tableau.
+- Découverte des saisons et classement quotidien via SportsAPI Pro V2. Les deux tableaux sont mis en cache et les mises à jour sont reportées si le compteur atteint 65 requêtes sur 100.
+- Ressource Historique 1.3.0 et nouvelle vue YAML Classements.
+
 ## 0.6.0
 
 - Corrige la colonne ÉVAL : `rating` n’est plus présenté comme une évaluation basket. Calcul local de l’EFF classique à partir des statistiques complètes ; note fournisseur conservée dans les détails, champs manquants indiqués par « — ».

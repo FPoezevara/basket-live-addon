@@ -1,5 +1,5 @@
-/* Basket Live · Historique de saison 1.1.0. Données MQTT locales uniquement : aucun appel API. */
-const HIST_VERSION = '1.1.0';
+/* Basket Live · Historique de saison 1.3.0. Données MQTT locales uniquement : aucun appel API. */
+const HIST_VERSION = '1.3.0';
 const histEscape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const histNumber = value => value === null || value === undefined || value === '' ? '—'
   : typeof value === 'number' ? new Intl.NumberFormat('fr-FR', {maximumFractionDigits: 2}).format(value) : String(value);
@@ -90,6 +90,15 @@ function histEvaluation(s) {
 }
 const histDrapeau = m => m.categorie === 'europe' || [138,141,9357,2165].includes(Number(m.tournoi_id)) ? '🇪🇺' : '🇫🇷';
 
+function histScoreQuarts(m) {
+  const dom = Array.isArray(m.quarts_dom) ? m.quarts_dom : [];
+  const ext = Array.isArray(m.quarts_ext) ? m.quarts_ext : [];
+  const prolongation = m.prolongation_dom != null || m.prolongation_ext != null;
+  return `<div class="quarts"><table><caption>Score par quart-temps</caption><thead><tr><th scope="col">Équipe</th>${[1,2,3,4].map(i => `<th scope="col">QT${i}</th>`).join('')}${prolongation ? '<th scope="col">Prol.</th>' : ''}<th scope="col">Total</th></tr></thead><tbody>
+    <tr><th scope="row">${histEscape(m.domicile)}</th>${[0,1,2,3].map(i => `<td>${histEscape(histNumber(dom[i]))}</td>`).join('')}${prolongation ? `<td>${histEscape(histNumber(m.prolongation_dom))}</td>` : ''}<td><b>${histEscape(histNumber(m.score_dom))}</b></td></tr>
+    <tr><th scope="row">${histEscape(m.exterieur)}</th>${[0,1,2,3].map(i => `<td>${histEscape(histNumber(ext[i]))}</td>`).join('')}${prolongation ? `<td>${histEscape(histNumber(m.prolongation_ext))}</td>` : ''}<td><b>${histEscape(histNumber(m.score_ext))}</b></td></tr></tbody></table></div>`;
+}
+
 class BasketHistoriqueCard extends HTMLElement {
   setConfig(config) {
     this._config = {capteur: 'sensor.basket_live_resultats_saison', ...config};
@@ -141,7 +150,7 @@ class BasketHistoriqueCard extends HTMLElement {
     const d = etat.attributes;
     const periodes = histPeriods(d.statistics?.reponse);
     const composition = histLineups(d.lineups?.reponse);
-    let html = this._scoreQuarts(m);
+    let html = histScoreQuarts(m);
     html += '<section class="stat-section"><h3>Comparaison des équipes</h3>';
     if (periodes.length && periodes.some(p => p.groups.some(g => g.statisticsItems?.length))) {
       const choisi = this._periodes.get(m.id) || periodes.find(p => ['ALL', 'all'].includes(p.period))?.period || periodes[0].period;
@@ -185,14 +194,6 @@ class BasketHistoriqueCard extends HTMLElement {
       : etat === 'indisponible' ? 'Ces données n’ont pas pu être récupérées lors de la collecte unique.'
       : 'Aucune donnée fournie pour cette rubrique.';
     return `<p class="notice">${histEscape(texte)}</p>`;
-  }
-  _scoreQuarts(m) {
-    const dom = Array.isArray(m.quarts_dom) ? m.quarts_dom : [];
-    const ext = Array.isArray(m.quarts_ext) ? m.quarts_ext : [];
-    const prolongation = m.prolongation_dom != null || m.prolongation_ext != null;
-    return `<div class="quarts"><table><caption>Score par quart-temps</caption><thead><tr><th scope="col">Équipe</th>${[1,2,3,4].map(i => `<th scope="col">QT${i}</th>`).join('')}${prolongation ? '<th scope="col">Prol.</th>' : ''}<th scope="col">Total</th></tr></thead><tbody>
-      <tr><th scope="row">${histEscape(m.domicile)}</th>${[0,1,2,3].map(i => `<td>${histEscape(histNumber(dom[i]))}</td>`).join('')}${prolongation ? `<td>${histEscape(histNumber(m.prolongation_dom))}</td>` : ''}<td><b>${histEscape(histNumber(m.score_dom))}</b></td></tr>
-      <tr><th scope="row">${histEscape(m.exterieur)}</th>${[0,1,2,3].map(i => `<td>${histEscape(histNumber(ext[i]))}</td>`).join('')}${prolongation ? `<td>${histEscape(histNumber(m.prolongation_ext))}</td>` : ''}<td><b>${histEscape(histNumber(m.score_ext))}</b></td></tr></tbody></table></div>`;
   }
   _joueurs(joueurs) {
     const lignes = [...joueurs].sort((a,b) => Boolean(a.substitute) - Boolean(b.substitute) || (b.statistics?.points ?? -1) - (a.statistics?.points ?? -1));
@@ -288,3 +289,314 @@ customElements.define('basket-historique-card', BasketHistoriqueCard);
 window.customCards = window.customCards || [];
 window.customCards.push({type:'basket-historique-card',name:'Basket Live · Historique de saison',description:'Résultats de saison et feuilles de match Nanterre en accordéon.'});
 console.info(`Basket Live · Historique ${HIST_VERSION}`);
+
+class BasketPronosticsCard extends HTMLElement {
+  setConfig(config) {
+    this._recents = config.mode === 'recents';
+    this._sources = this._recents
+      ? ['sensor.basket_live_resultats']
+      : ['sensor.basket_live_classement', 'sensor.basket_live_pronostics'];
+    this._sourcesPrecedentes = [];
+    if (!this.shadowRoot) this.attachShadow({mode: 'open'});
+    if (this._hass) this.hass = this._hass;
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (!this._sources) return;
+    const sources = this._sources.map(id => hass.states[id]);
+    if (sources.length === this._sourcesPrecedentes.length &&
+        sources.every((source, i) => source === this._sourcesPrecedentes[i])) return;
+    this._sourcesPrecedentes = sources;
+    const [premiere, seconde] = sources.map(source => source?.attributes || {});
+    const baremeOuvert = this.shadowRoot.querySelector('details.bareme')?.open;
+    const contenu = this._recents
+      ? this._resultatsRecents(premiere.matchs || [])
+      : this._concours(premiere, seconde, baremeOuvert);
+    this.shadowRoot.innerHTML = `<style>${HIST_STYLE}${PRONOS_STYLE}</style><ha-card>${contenu}</ha-card>`;
+  }
+
+  getGridOptions() { return {columns: 'full', min_columns: 6}; }
+
+  _choix(pronos, joueur) {
+    const choix = pronos.pronos?.[joueur];
+    const resultat = pronos.resultats?.[joueur];
+    let valeur = '—';
+    let classe = 'prono-absent';
+    if (choix != null) {
+      valeur = histEscape(choix);
+      if (resultat === true) {
+        classe = 'prono-gagne';
+        valeur += ` ✓ (+${histEscape(histNumber(pronos.points?.[joueur] ?? 0))})`;
+      } else if (resultat === false) {
+        classe = 'prono-perdu';
+        valeur += ' ✗ (0 pt)';
+      }
+    }
+    return `<span class="${classe}"><b>${joueur === 'ilona' ? 'Ilona' : 'Francis'}</b> ${valeur}</span>`;
+  }
+
+  _resultatsRecents(matchs) {
+    let jour = '';
+    let lignes = '';
+    for (const m of [...matchs].sort((a, b) => String(b.debut).localeCompare(String(a.debut)))) {
+      const date = new Date(m.debut).toLocaleDateString('fr-FR', {
+        weekday: 'long', day: '2-digit', month: '2-digit', timeZone: 'Europe/Paris'
+      });
+      if (date !== jour) {
+        jour = date;
+        lignes += `<h3 class="jour-recent">${histEscape(date)}</h3>`;
+      }
+      const prolongation = m.prolongation_dom != null || m.prolongation_ext != null;
+      lignes += `<div class="match-recent">
+        <div>${histEscape(m.domicile)} <strong>${histEscape(histNumber(m.score_dom))} – ${histEscape(histNumber(m.score_ext))}</strong>
+          ${histEscape(m.exterieur)}${prolongation ? ' a.p.' : ''} <span class="competition">${histDrapeau(m)} ${histEscape(m.tournoi)}</span></div>
+        <div class="choix-recents">${this._choix(m.pronostics || {}, 'ilona')}${this._choix(m.pronostics || {}, 'francis')}</div>
+      </div>`;
+    }
+    return `<div class="contenu recents">${lignes || '<p class="notice">Aucun résultat.</p>'}</div>`;
+  }
+
+  _concours(classement, pronostics, baremeOuvert) {
+    const joueurs = [...(classement.joueurs || [])]
+      .sort((a, b) => b.points - a.points || b.bons - a.bons);
+    const matchs = pronostics.matchs || [];
+    const [premier, second] = joueurs;
+    const egalite = joueurs.length === 2 &&
+      premier.points === second.points && premier.bons === second.bons;
+    const reussites = j => `${histEscape(histNumber(j.bons))} sur ${histEscape(histNumber(j.pronos))} réussis`;
+    const tuile = (titre, points, bilan) => `<article class="rang">
+      <span class="rang-nom">${titre}</span>
+      <div class="rang-score">${histEscape(histNumber(points))} <span>pts</span></div>
+      <span class="competition">${bilan}</span>
+    </article>`;
+    const podium = egalite
+      ? tuile("Égalité de l'amour - Ilona et Francis", premier.points,
+          premier.pronos === second.pronos
+            ? reussites(premier)
+            : joueurs.map(j => `${histEscape(j.nom)} · ${reussites(j)}`).join('<br>'))
+      : joueurs.map((j, i) => tuile(
+          `<span class="rang-numero">${i + 1}</span>${histEscape(j.nom)}`, j.points, reussites(j)
+        )).join('');
+    const lignes = matchs.map(m => {
+      const date = new Date(m.debut).toLocaleDateString('fr-FR', {
+        day: '2-digit', month: 'short', timeZone: 'Europe/Paris'
+      });
+      return `<article class="resultat simple${m.categorie === 'nanterre' ? ' nanterre' : ''}">
+        <div class="result-meta"><span>${histEscape(date)}</span><span>${histDrapeau(m)} ${histEscape(m.tournoi)}</span></div>
+        <div class="result-score">
+          <span class="equipe-nom">${histEscape(m.domicile)}</span>
+          <strong${m.termine && m.score ? '' : ' class="etat-match"'}>${histEscape(m.termine ? m.score || '—' : 'En cours')}</strong>
+          <span class="equipe-nom droite">${histEscape(m.exterieur)}</span>
+        </div>
+        <div class="choix-concours">${this._choix(m, 'ilona')}${this._choix(m, 'francis')}</div>
+      </article>`;
+    }).join('');
+    return `<header class="hero">
+      <span class="kicker">BASKET LIVE · CONCOURS</span>
+      <h1>Pronostics</h1>
+      <p>Saison ${histEscape(classement.saison || pronostics.saison || 'en cours')}</p>
+    </header>
+    <div class="contenu concours">
+      <h2>Classement</h2>
+      <div class="podium">${podium || '<p class="notice">Classement indisponible.</p>'}</div>
+      <details class="bareme"${baremeOuvert ? ' open' : ''}>
+        <summary>Barème des points</summary>
+        <ul>
+          <li>3 points pour Nanterre en Betclic Élite</li>
+          <li>2 points pour Nanterre hors Betclic Élite ou un autre match de Betclic Élite</li>
+          <li>1 point pour les autres matchs</li>
+        </ul>
+      </details>
+      <h2>Matchs pronostiqués</h2>
+      ${lignes || '<p class="notice">Les pronostics apparaissent ici à l’entre-deux.</p>'}
+    </div>`;
+  }
+}
+
+const PRONOS_STYLE = `
+  .competition { color: var(--secondary-text-color, #aab5bf); font-size: 11px; }
+  .recents { padding-block: 10px; }
+  .jour-recent { margin: 10px 0 5px; text-transform: capitalize; }
+  .jour-recent:first-child { margin-top: 0; }
+  .match-recent { padding: 6px 0; line-height: 1.3; border-bottom: 1px solid var(--divider-color, #333c43); }
+  .match-recent:last-child { border-bottom: 0; }
+  .choix-recents { display: flex; flex-wrap: wrap; gap: 0 12px; margin-top: 2px; font-size: 11px; line-height: 1.25; }
+  .concours h2 { font-size: 16px; margin: 4px 0 10px; }
+  .podium { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 135px), 1fr)); gap: 8px; }
+  .rang { border: 1px solid var(--divider-color, #333c43); border-radius: 12px; padding: 12px; }
+  .rang-nom { display: flex; gap: 8px; align-items: center; font-weight: 700; }
+  .rang-numero { border-radius: 6px; padding: 2px 7px; background: #66c87926; }
+  .rang-score { margin: 8px 0 3px; font-size: 25px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .rang-score span { font-size: 12px; }
+  .bareme { margin: 12px 0 22px; font-size: 12px; color: var(--secondary-text-color, #aab5bf); }
+  .bareme summary { cursor: pointer; }
+  .bareme ul { padding-inline-start: 20px; }
+  .choix-concours { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; font-size: 12px; overflow-wrap: anywhere; }
+  .choix-concours > span { padding: 6px 8px; border-radius: 8px; background: var(--secondary-background-color, #8881); }
+  .result-score strong.etat-match { font-size: 12px; letter-spacing: normal; }
+`;
+customElements.define('basket-pronostics-card', BasketPronosticsCard);
+window.customCards.push({
+  type: 'basket-pronostics-card',
+  name: 'Basket Live · Pronostics',
+  description: 'Classement et matchs pronostiqués, ou résultats récents en mode recents.'
+});
+
+class BasketScoreDirectCard extends HTMLElement {
+  setConfig() {
+    this._derniereSource = null;
+    if (!this.shadowRoot) this.attachShadow({mode: 'open'});
+    if (this._hass) this.hass = this._hass;
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (!this.shadowRoot) return;
+    const source = hass.states['sensor.basket_live_lives_en_cours'];
+    if (source === this._derniereSource) return;
+    this._derniereSource = source;
+    const disponible = source && !['unknown', 'unavailable'].includes(source.state);
+    const matchs = disponible ? source.attributes?.matchs || [] : [];
+    const cartes = matchs.map(m => `<article class="resultat simple${m.categorie === 'nanterre' ? ' nanterre' : ''}">
+      <div class="direct-meta">
+        <span>${histDrapeau(m)} ${histEscape(m.tournoi)}</span>
+        <span class="periode-direct">${histEscape(m.statut)}${m.chrono ? ` · ${histEscape(m.chrono)}` : ''}</span>
+      </div>
+      <div class="result-score">
+        <span class="equipe-nom">${histEscape(m.domicile)}</span>
+        <strong>${histEscape(histNumber(m.score_dom))}<span>–</span>${histEscape(histNumber(m.score_ext))}</strong>
+        <span class="equipe-nom droite">${histEscape(m.exterieur)}</span>
+      </div>
+      <details class="quarts-direct"${this._quartsOuverts?.has(String(m.id)) ? ' open' : ''} data-match="${histEscape(m.id)}">
+        <summary>Score par quart-temps</summary>
+        ${histScoreQuarts(m)}
+      </details>
+    </article>`).join('');
+    this.shadowRoot.innerHTML = `<style>${HIST_STYLE}${DIRECT_STYLE}</style><ha-card>
+      <header class="hero direct-hero">
+        <div><span class="kicker">BASKET LIVE</span><h2>En direct</h2></div>
+        ${matchs.length ? `<span class="badge-direct">${matchs.length} match${matchs.length > 1 ? 's' : ''}</span>` : ''}
+      </header>
+      <div class="contenu direct-contenu">
+        ${cartes || `<p class="notice">${disponible ? 'Aucun match en cours.' : 'Scores momentanément indisponibles.'}</p>`}
+      </div>
+    </ha-card>`;
+    this.shadowRoot.querySelectorAll('details.quarts-direct').forEach(details => {
+      details.addEventListener('toggle', () => {
+        this._quartsOuverts ??= new Set();
+        if (details.open) this._quartsOuverts.add(details.dataset.match);
+        else this._quartsOuverts.delete(details.dataset.match);
+      });
+    });
+  }
+
+  getGridOptions() { return {columns: 'full', min_columns: 6}; }
+}
+
+const DIRECT_STYLE = `
+  .direct-hero { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-block: 12px; }
+  .direct-hero h2 { margin: 3px 0 0; font-size: 22px; line-height: 1.2; }
+  .badge-direct { white-space: nowrap; color: #fff; background: #ffffff20; border-radius: 20px; padding: 5px 10px; font-size: 11px; font-weight: 600; }
+  .direct-contenu { padding-block: 10px; }
+  .direct-contenu .notice { margin: 4px 0; }
+  .direct-contenu .resultat:last-child { margin-bottom: 0; }
+  .direct-meta { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 12px; font-size: 11px; }
+  .periode-direct { background: #f26b1d18; border: 1px solid #f26b1d70; border-radius: 12px; padding: 2px 7px; font-variant-numeric: tabular-nums; }
+  .direct-contenu .result-score strong { font-size: clamp(22px, 5vw, 34px); }
+  .quarts-direct { margin-top: 9px; font-size: 11px; color: var(--secondary-text-color, #aab5bf); }
+  .quarts-direct summary { cursor: pointer; }
+  .quarts-direct .quarts { margin-top: 5px; }
+  .quarts-direct caption { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+`;
+customElements.define('basket-score-direct-card', BasketScoreDirectCard);
+window.customCards.push({
+  type: 'basket-score-direct-card',
+  name: 'Basket Live · Scores en direct',
+  description: 'Scores, chronomètre et détail par quart-temps.'
+});
+
+class BasketClassementsCard extends HTMLElement {
+  setConfig() {
+    this._source = null;
+    if (!this.shadowRoot) this.attachShadow({mode: 'open'});
+    if (this._hass) this.hass = this._hass;
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (!this.shadowRoot) return;
+    const source = hass.states['sensor.basket_live_classements_competitions'];
+    if (source === this._source) return;
+    this._source = source;
+    const attrs = source?.attributes || {};
+    const tableaux = attrs.tableaux || {};
+    this.shadowRoot.innerHTML = `<style>${HIST_STYLE}${CLASSEMENTS_STYLE}</style><ha-card>
+      <header class="hero">
+        <span class="kicker">BASKET LIVE · COMPÉTITIONS</span>
+        <h1>Classements</h1>
+        <p>Saison ${histEscape(attrs.saison || 'en cours')}</p>
+      </header>
+      <div class="contenu">
+        ${this._tableau('🇫🇷 Betclic Élite', tableaux.elite)}
+        ${this._tableau('🇪🇺 Basketball Champions League', tableaux.bcl, true)}
+        <p class="legende">J = matchs joués · G = gagnés · P = perdus · Pts = points au classement · PM = points marqués · PE = points encaissés · Diff. = PM − PE</p>
+      </div>
+    </ha-card>`;
+  }
+
+  getGridOptions() { return {columns: 'full', min_columns: 6}; }
+
+  _tableau(titre, tableau, bcl = false) {
+    const nombre = valeur => histEscape(histNumber(valeur));
+    const equipes = tableau?.equipes || [];
+    const date = tableau?.mis_a_jour && new Date(tableau.mis_a_jour).toLocaleString('fr-FR', {
+      timeZone: 'Europe/Paris', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+    });
+    return `<section class="classement-competition">
+      <h2>${titre}</h2>
+      ${bcl ? `<p class="notice">${histEscape(tableau?.groupe || 'Poule de Nanterre')}</p>` : ''}
+      ${equipes.length ? `<div class="classement-scroll" tabindex="0" role="region" aria-label="${histEscape(titre)}">
+        <table class="classement-equipes" aria-label="${histEscape(titre)}">
+          <thead><tr>
+            <th scope="col">Équipe</th><th scope="col">J</th><th scope="col">G</th><th scope="col">P</th>
+            <th scope="col">Pts</th><th scope="col">PM</th><th scope="col">PE</th><th scope="col">Diff.</th><th scope="col">% G</th>
+          </tr></thead>
+          <tbody>${equipes.map(e => `<tr${e.nanterre ? ' class="classement-nanterre"' : ''}>
+            <th scope="row"><span class="place-equipe">${nombre(e.rang)}</span> ${histEscape(e.equipe)}</th>
+            <td>${nombre(e.joues)}</td><td>${nombre(e.victoires)}</td><td>${nombre(e.defaites)}</td>
+            <td><b>${nombre(e.points)}</b></td><td>${nombre(e.marques)}</td><td>${nombre(e.encaisses)}</td>
+            <td>${e.difference > 0 ? '+' : ''}${nombre(e.difference)}</td>
+            <td>${nombre(e.pourcentage)}${e.pourcentage == null ? '' : ' %'}</td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>` : '<p class="notice">Classement momentanément indisponible.</p>'}
+      ${date ? `<p class="cache">Dernière mise à jour le ${histEscape(date)}</p>` : ''}
+    </section>`;
+  }
+}
+
+const CLASSEMENTS_STYLE = `
+  .classement-competition + .classement-competition { margin-top: 28px; }
+  .classement-competition h2 { font-size: 17px; margin: 4px 0 8px; }
+  .classement-competition .cache { margin-top: 8px; }
+  .classement-scroll { overflow-x: auto; border: 1px solid var(--divider-color, #8885); border-radius: 12px; }
+  .classement-scroll:focus-visible { outline: 2px solid var(--vert); outline-offset: 2px; }
+  .classement-equipes { min-width: 460px; }
+  .classement-equipes th:first-child { position: sticky; left: 0; z-index: 1; text-align: left; background: var(--ha-card-background, var(--card-background-color, #fff)); }
+  .classement-equipes thead th { font-size: 11px; }
+  .classement-equipes th, .classement-equipes td { padding: 9px 7px; }
+  .classement-equipes tbody tr:last-child > * { border-bottom: 0; }
+  .place-equipe { display: inline-block; min-width: 22px; margin-right: 3px; font-variant-numeric: tabular-nums; }
+  .classement-nanterre > * { background: #66c87930; font-weight: 700; }
+  .classement-equipes .classement-nanterre th:first-child {
+    border-left: 3px solid #51a865;
+    background: linear-gradient(#66c87938, #66c87938), var(--ha-card-background, var(--card-background-color, #fff));
+  }
+`;
+customElements.define('basket-classements-card', BasketClassementsCard);
+window.customCards.push({
+  type: 'basket-classements-card',
+  name: 'Basket Live · Classements',
+  description: 'Betclic Élite et poule de Nanterre en Basketball Champions League.'
+});

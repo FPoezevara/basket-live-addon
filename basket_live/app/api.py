@@ -143,6 +143,9 @@ class Api:
     async def saisons_tournoi(self, identifiant: int):
         return await self.get(f"/api/tournament/{identifiant}/seasons", FOND)
 
+    async def classement_tournoi(self, identifiant: int, saison_id: int):
+        return await self.get(f"/api/tournament/{identifiant}/season/{saison_id}/standings?type=total", FOND)
+
     async def historique_tournoi(self, identifiant: int, saison_id: int, page: int):
         return await self.get(f"/api/tournament/{identifiant}/season/{saison_id}/events/last/{page}",
                               FOND, vide_404=True)

@@ -21,7 +21,8 @@ import aiohttp
 from . import VERSION, config
 from .api import ESSENTIEL, FOND, Api
 from .secours import resultat_correspondant
-from .archives import Archives
+from .archives import Archives, liste, saison_compatible
+from .classements import normaliser_classement
 from .notifications import Notifications
 from .suivis import Suivis
 from .pronos import Pronos, ouvert, saison
@@ -63,6 +64,7 @@ class App:
         self.matchs: dict[int, Match] = {}
         self.resultats: list[Match] = []
         self.dernier_calendrier: dict[str, float] = {}
+        self.classements: dict = {}
         self.dernier_instantane = 0.0
         self.verrou_instantane = asyncio.Lock()
         self.dernier_secours: dict[str, float] = {}
@@ -158,6 +160,7 @@ class App:
         self.matchs = {m.id: m for m in (Match.depuis_dict(d) for d in etat.get("matchs", []))}
         self.resultats = [Match.depuis_dict(d) for d in etat.get("resultats", [])]
         self.dernier_calendrier = etat.get("dernier_calendrier", {})
+        self.classements = etat.get("classements", {})
         self.prochain_calendrier_lointain = max(self.prochain_calendrier_lointain,
                                                 etat.get("prochain_calendrier_lointain", 0))
         self.pronos.charger(etat.get("pronos", {}))
@@ -177,6 +180,7 @@ class App:
             "matchs": [asdict(m) for m in self.matchs.values()],
             "resultats": [asdict(m) for m in self.resultats],
             "dernier_calendrier": self.dernier_calendrier,
+            "classements": self.classements,
             "prochain_calendrier_lointain": self.prochain_calendrier_lointain,
             "pronos": self.pronos.vers_dict(),
             "suivis": self.suivis.vers_dict(),
@@ -290,6 +294,14 @@ class App:
         self.bus.poser(topic_etat("requetes_du_jour"), str(self.api.compteur))
         self.bus.poser(topic_etat("websocket"), "ON" if self.ws_connecte else "OFF")
         self.publier_pronos(maintenant)
+        saison_courante = saison(maintenant, self.tz)
+        tableaux = self.classements.get("tableaux", {}) if self.classements.get("saison") == saison_courante else {}
+        self.bus.poser(topic_etat("classements_competitions"),
+                       str(sum(bool(t.get("equipes")) for t in tableaux.values())))
+        self.bus.poser(topic_attributs("classements_competitions"), json.dumps({
+            "saison": saison_courante, "tableaux": tableaux,
+        }, ensure_ascii=False))
+
         if self.suivis.nettoyer({i for i, m in self.matchs.items() if not m.termine}):
             self.etat_modifie = True
         for joueur, choix in self.suivis.vers_dict().items():
@@ -678,11 +690,50 @@ class App:
                                         maintenant=self.horloge()):
             self.marquer()
 
+    async def rafraichir_classements(self) -> None:
+        """Une consultation quotidienne par tournoi, dans le budget de fond."""
+        if not self.api.disponible(FOND) or self.api.compteur >= self.archives.plafond_import(self.api):
+            return
+        maintenant = self.horloge()
+        courante = saison(maintenant, self.tz)
+        if self.classements.get("saison") != courante:
+            self.classements = {"saison": courante, "tableaux": {}}
+        tableaux = self.classements["tableaux"]
+        jour = self.aujourdhui().isoformat()
+        for cle, tournoi in (("elite", 156), ("bcl", 9357)):
+            tableau = tableaux.setdefault(cle, {})
+            if tableau.get("jour_tentative") == jour:
+                continue
+            tableau["jour_tentative"] = jour
+            # Le compteur REST sauvegarde l'état avant l'appel réseau.
+            sid = tableau.get("saison_id")
+            if not sid:
+                rep = await self.api.saisons_tournoi(tournoi)
+                saisons = liste(rep, "seasons") or []
+                sid = next((entier(s.get("id")) for s in saisons
+                            if isinstance(s, dict) and entier(s.get("id"))
+                            and saison_compatible(s, int(courante[:4]))), None)
+                if sid:
+                    tableau["saison_id"] = sid
+                    tableau.pop("jour_tentative")
+            else:
+                rep = await self.api.classement_tournoi(tournoi, sid)
+                resultat = normaliser_classement(rep, self.cfg.equipe_nanterre, bcl=cle == "bcl")
+                if resultat:
+                    tableau.update(resultat, mis_a_jour=datetime.fromtimestamp(maintenant, self.tz).isoformat())
+                    log.info("Classement %s : %s équipes", cle, len(resultat["equipes"]))
+                else:
+                    log.warning("Classement %s indisponible, dernier tableau conservé", cle)
+            self.marquer()
+            self.sauver_etat()
+            return
+
     async def boucle_planif(self) -> None:
         await self.demarrage()
         while True:
             try:
                 await self.planifier()
+                await self.rafraichir_classements()
             except Exception:                           # une erreur ne doit pas arrêter l'ordonnanceur
                 log.exception("Erreur dans l'ordonnanceur")
             await asyncio.sleep(PERIODE_PLANIF)

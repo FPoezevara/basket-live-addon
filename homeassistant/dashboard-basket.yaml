@@ -1,7 +1,7 @@
 # Tableau de bord « Basket » (URL : dashboard-basket), tel qu'exporté par l'éditeur de HA le 05/11/2026.
 # À coller dans : tableau de bord > crayon > ⋮ > Éditeur de configuration brute.
 # Visibilité par utilisateur : Francis c2af4c5a…, Ilona 7521abea… (user_id HA).
-# Ressource supplémentaire : /local/basket-historique-card.js?v=1.1.0 (module).
+# Ressource supplémentaire : /local/basket-historique-card.js?v=1.3.0 (module).
 # Ressource requise : /local/basket-a-venir-card.js?v=1.3.0 (module), copie de www/basket-a-venir-card.js.
 title: Basket
 views:
@@ -9,51 +9,21 @@ views:
     path: direct
     icon: mdi:basketball
     type: sections
-    max_columns: 3
+    max_columns: 2
     sections:
       - type: grid
-        column_span: 3
+        column_span: 2
         cards:
           - type: custom:basket-entete-card
             titre: Basket Live
       - type: grid
+        column_span: 2
         cards:
-          - type: heading
-            heading: En direct
-            icon: mdi:broadcast
-          - type: markdown
-            content: >-
-              {% set eu = [138, 141, 9357, 2165] %}
-
-              {% set l = state_attr('sensor.basket_live_lives_en_cours',
-              'matchs') or [] %}
-
-              {% if l | count == 0 %}*Aucun match en cours.*{% endif %}
-
-              {% for m in l %}
-
-              **{{ '🇪🇺' if m.tournoi_id in eu else '🇫🇷' }} {{ m.tournoi }}**
-              · {{ m.statut }}{% if m.chrono %} · {{ m.chrono }}{% endif %}
-
-
-              {% set ot = m.prolongation_dom is not none %}
-
-              | | 1 | 2 | 3 | 4 |{% if ot %} P |{% endif %} **Total** |
-
-              |:--|--:|--:|--:|--:|{% if ot %}--:|{% endif %}--:|
-
-              | {{ m.domicile }} |{% for q in m.quarts_dom %} {{ q if q is not
-              none else '·' }} |{% endfor %}{% if ot %} {{ m.prolongation_dom }}
-              |{% endif %} **{{ m.score_dom if m.score_dom is not none else '·'
-              }}** |
-
-              | {{ m.exterieur }} |{% for q in m.quarts_ext %} {{ q if q is not
-              none else '·' }} |{% endfor %}{% if ot %} {{ m.prolongation_ext }}
-              |{% endif %} **{{ m.score_ext if m.score_ext is not none else '·'
-              }}** |
-
-
-              {% endfor %}
+          - type: custom:basket-score-direct-card
+            grid_options:
+              columns: full
+      - type: grid
+        cards:
           - type: heading
             heading: Les 7 prochains jours
             icon: mdi:calendar-clock
@@ -61,37 +31,6 @@ views:
             joueurs:
               c2af4c5a136e448ab37deaae63146536: francis
               7521abea3321478f8c461ee465767fcb: ilona
-          - type: heading
-            heading: Résultats des 7 derniers jours
-            icon: mdi:scoreboard
-          - type: markdown
-            content: >-
-              {% set jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'] %}
-              {% set eu = [138, 141, 9357, 2165] %}
-              {% set l = state_attr('sensor.basket_live_resultats', 'matchs') or [] %}
-              {% macro prono(p, joueur, nom) -%}
-                {%- set choix = p.get('pronos', {}).get(joueur) -%}
-                {%- set resultat = p.get('resultats', {}).get(joueur) -%}
-                {%- if choix is none or resultat is none -%}{{ nom }} : —
-                {%- elif resultat -%}<font color="#2e7d32">{{ nom }} : ✔ {{ choix | e }} (+{{ p.get('points', {}).get(joueur, 0) }})</font>
-                {%- else -%}<font color="#e86d1f">{{ nom }} : ✘ {{ choix | e }} (0 pt)</font>
-                {%- endif -%}
-              {%- endmacro %}
-              {% if l | count == 0 %}*Aucun résultat.*{% endif %}
-              {% set ns = namespace(jour='') %}
-              {% for m in l | sort(attribute='debut', reverse=true) %}
-              {% set d = as_datetime(m.debut) | as_local %}
-              {% set j = jours[d.weekday()] ~ ' ' ~ d.strftime('%d/%m') %}
-              {% if j != ns.jour %}{% set ns.jour = j %}
-
-              **{{ j }}**
-
-              {% endif %}
-
-              - {{ m.domicile | e }} **{{ m.score_dom }} - {{ m.score_ext }}** {{ m.exterieur | e }}{{ ' a.p.' if m.prolongation_dom is not none else '' }} ({{ '🇪🇺' if m.tournoi_id in eu else '🇫🇷' }} {{ m.tournoi | e }})<br>
-                <small>{{ prono(m.pronostics | default({}), 'ilona', 'Ilona') }} · {{ prono(m.pronostics | default({}), 'francis', 'Francis') }}</small>
-
-              {% endfor %}
       - type: grid
         cards:
           - type: heading
@@ -135,78 +74,13 @@ views:
     max_columns: 2
     sections:
       - type: grid
-        column_span: 3
+        column_span: 2
         cards:
           - type: custom:basket-entete-card
             titre: Basket Live
-      - type: grid
-        cards:
-          - type: heading
-            heading: Classement
-            icon: mdi:podium
-          - type: markdown
-            content: >-
-              {% set c = state_attr('sensor.basket_live_classement', 'joueurs')
-              or [] %}
-
-              {% set medailles = ['🥇', '🥈', '🥉'] %}
-
-              {% for j in c %}
-
-              {{ medailles[loop.index0] if loop.index0 < 3 else '' }} **{{ j.nom
-              }}** · {{ j.points }} pt{{ 's' if j.points > 1 else '' }} · {{
-              j.bons }} bon{{ 's' if j.bons > 1 else '' }} pronostic{{ 's' if
-              j.bons > 1 else '' }} sur {{ j.pronos }}
-
-              {% endfor %}
-
-
-              *Saison {{ state_attr('sensor.basket_live_classement', 'saison')
-              }}
-
-              · 3 points pour un match de Nanterre en Betclic Elite
-
-              · 2 points pour un match de Nanterre hors Betclic Elite
-
-              · 2 points pour un match sans Nanterre en Betclic Elite
-
-              · 1 point pour un match sans Nanterre hors Betclic Elite*
-      - type: grid
-        cards:
-          - type: heading
-            heading: Matchs pronostiqués
-            icon: mdi:history
-          - type: markdown
-            content: >-
-              {% set eu = [138, 141, 9357, 2165] %}
-
-              {% set l = state_attr('sensor.basket_live_pronostics', 'matchs')
-              or [] %}
-
-              {% macro cellule(m, j) -%}
-                {%- set p = m.pronos[j] -%}
-                {%- set r = m.resultats[j] -%}
-                {%- if p is none -%}·
-                {%- elif r is none -%}{{ p }}
-                {%- elif r -%}<font color="#2e7d32">✔ {{ p }} (+{{ m.points[j] }})</font>
-                {%- else -%}<font color="#c62828">✘ {{ p }}</font>
-                {%- endif -%}
-              {%- endmacro %}
-
-              {% if l | count == 0 %}*Aucun match pronostiqué pour l'instant.
-              Les pronostics apparaissent ici à l'entre-deux.*{% else %}
-
-              | Date | Match | Score | Ilona | Francis |
-
-              |:--|:--|:-:|:--|:--|
-
-              {% for m in l %}{% set d = as_datetime(m.debut) | as_local %}| {{
-              d.strftime('%d/%m') }} | {{ '🇪🇺' if m.tournoi_id in eu else
-              '🇫🇷' }} {{ m.domicile }} - {{ m.exterieur }} | {{ m.score if
-              m.termine else '*en cours*' }} | {{ cellule(m, 'ilona') }} | {{
-              cellule(m, 'francis') }} |
-
-              {% endfor %}{% endif %}
+          - type: custom:basket-pronostics-card
+            grid_options:
+              columns: full
 
   - title: Historique
     path: historique
@@ -221,5 +95,20 @@ views:
             titre: Basket Live
           - type: custom:basket-historique-card
             capteur: sensor.basket_live_resultats_saison
+            grid_options:
+              columns: full
+
+  - title: Classements
+    path: classements
+    icon: mdi:podium
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
+        column_span: 2
+        cards:
+          - type: custom:basket-entete-card
+            titre: Basket Live
+          - type: custom:basket-classements-card
             grid_options:
               columns: full
