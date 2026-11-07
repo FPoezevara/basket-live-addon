@@ -65,6 +65,7 @@ class App:
         self.resultats: list[Match] = []
         self.dernier_calendrier: dict[str, float] = {}
         self.classements: dict = {}
+        self.demande_classements = False
         self.dernier_instantane = 0.0
         self.verrou_instantane = asyncio.Lock()
         self.dernier_secours: dict[str, float] = {}
@@ -118,6 +119,8 @@ class App:
         if topic == COMMANDE:
             if texte.strip() == "rafraichir":
                 self.demande_rafraichir = True
+            elif texte.strip() == "rafraichir_classements":
+                self.demande_classements = True
             elif texte.strip() == "tester_archive_nanterre":
                 self.archives.demande_test = True
                 log.info("Test archive Nanterre demandé par MQTT")
@@ -691,8 +694,12 @@ class App:
             self.marquer()
 
     async def rafraichir_classements(self) -> None:
-        """Une consultation quotidienne par tournoi, dans le budget de fond."""
+        """Une consultation quotidienne par tournoi, avec une relance manuelle par jour."""
+        demande = self.demande_classements
+        self.demande_classements = False
         if not self.api.disponible(FOND) or self.api.compteur >= self.archives.plafond_import(self.api):
+            if demande:
+                log.warning("Relance des classements refusée : marge de quota préservée")
             return
         maintenant = self.horloge()
         courante = saison(maintenant, self.tz)
@@ -700,6 +707,15 @@ class App:
             self.classements = {"saison": courante, "tableaux": {}}
         tableaux = self.classements["tableaux"]
         jour = self.aujourdhui().isoformat()
+        if demande:
+            if self.classements.get("jour_relance_manuelle") == jour:
+                log.info("Relance des classements déjà demandée aujourd’hui")
+            else:
+                self.classements["jour_relance_manuelle"] = jour
+                for tableau in tableaux.values():
+                    tableau.pop("jour_tentative", None)
+                self.sauver_etat()
+                log.info("Relance manuelle des classements Élite et BCL")
         for cle, tournoi in (("elite", 156), ("bcl", 9357)):
             tableau = tableaux.setdefault(cle, {})
             if tableau.get("jour_tentative") == jour:

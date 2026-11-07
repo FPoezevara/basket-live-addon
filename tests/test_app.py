@@ -342,3 +342,15 @@ def test_classements_selection_persistance_et_budget(tmp_path):
     assert len(api.appels) == 6
     assert app.classements["tableaux"]["bcl"]["mis_a_jour"] == bcl["mis_a_jour"]
     assert app.classements["tableaux"]["bcl"]["equipes"] == bcl["equipes"]
+
+    from app.bus import COMMANDE
+    app.sur_commande(COMMANDE, "rafraichir_classements")
+    for _ in range(3):
+        asyncio.run(app.rafraichir_classements())
+    assert api.appels[6:] == [("classement", 156, 2), ("classement", 9357, 2)]
+    app, _ = faire_app(tmp_path, api, h)
+    app.charger_etat()
+    app.sur_commande(COMMANDE, "rafraichir_classements")
+    asyncio.run(app.rafraichir_classements())
+    assert len(api.appels) == 8
+

@@ -1,5 +1,9 @@
 # Journal des versions
 
+## 0.7.1
+
+- Commande MQTT `rafraichir_classements` pour relancer une fois par jour les tableaux Élite et BCL dans la marge de quota.
+
 ## 0.7.0
 
 - Onglet Classements avec la Betclic Élite complète et la poule de Nanterre en BCL. La ligne de Nanterre est mise en évidence dans chaque tableau.
