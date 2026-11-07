@@ -1,5 +1,5 @@
-/* Basket Live · Historique de saison 1.0.0. Données MQTT locales uniquement : aucun appel API. */
-const HIST_VERSION = '1.0.0';
+/* Basket Live · Historique de saison 1.1.0. Données MQTT locales uniquement : aucun appel API. */
+const HIST_VERSION = '1.1.0';
 const histEscape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const histNumber = value => value === null || value === undefined || value === '' ? '—'
   : typeof value === 'number' ? new Intl.NumberFormat('fr-FR', {maximumFractionDigits: 2}).format(value) : String(value);
@@ -9,14 +9,26 @@ const histLabels = {
   fieldGoalsMade:'Tirs réussis', fieldGoalAttempts:'Tirs tentés', fieldGoalPct:'Réussite aux tirs (valeur fournie)',
   twoPointsMade:'Tirs à 2 pts réussis', twoPointAttempts:'Tirs à 2 pts tentés', threePointsMade:'Tirs à 3 pts réussis', threePointAttempts:'Tirs à 3 pts tentés',
   freeThrowsMade:'Lancers francs réussis', freeThrowAttempts:'Lancers francs tentés', secondsPlayed:'Temps joué (secondes)', minutesPlayed:'Temps joué (minutes)',
-  plusMinus:'Plus / moins', rating:'Évaluation', fieldGoals:'Tirs', twoPointers:'Tirs à 2 points', threePointers:'Tirs à 3 points', freeThrows:'Lancers francs',
+  plusMinus:'Plus / moins', rating:'Note fournisseur', evaluation:'Évaluation fournie', efficiency:'Efficacité fournie', fieldGoals:'Tirs', twoPointers:'Tirs à 2 points', threePointers:'Tirs à 3 points', freeThrows:'Lancers francs',
   biggestLead:'Plus grand écart', biggestScoringRun:'Plus grande série', leadChanges:'Changements de leader', timeSpentInLead:'Temps en tête',
   fastBreakPoints:'Points en contre-attaque', pointsInPaint:'Points dans la raquette', benchPoints:'Points du banc', secondChancePoints:'Points sur seconde chance',
   pointsFromTurnovers:'Points après perte de balle', ALL:'Match', all:'Match', '1ST':'QT1', '2ND':'QT2', '3RD':'QT3', '4TH':'QT4',
   '1':'QT1','2':'QT2','3':'QT3','4':'QT4', OT:'Prolongation', 'Rebounds':'Rebonds', 'Scoring':'Tirs et points',
   'Other':'Autres indicateurs', 'Match overview':'Vue d’ensemble', 'Assists':'Passes décisives', 'Steals':'Interceptions', 'Blocks':'Contres', 'Turnovers':'Balles perdues'
 };
-const histLabel = key => histLabels[key] || String(key ?? '').replace(/([a-zà-ÿ])([A-Z])/g, '$1 $2').replace(/_/g, ' ').replace(/^./, s => s.toUpperCase());
+Object.assign(histLabels, {
+  'free throws':'Lancers francs', 'free throw percentage':'Réussite aux lancers francs', 'free throws percentage':'Réussite aux lancers francs',
+  '2 pointers':'Tirs à 2 points', '3 pointers':'Tirs à 3 points', 'two pointers':'Tirs à 2 points', 'three pointers':'Tirs à 3 points',
+  'field goals':'Tirs', 'field goal percentage':'Réussite aux tirs', '2 pointers percentage':'Réussite à 2 points', '3 pointers percentage':'Réussite à 3 points',
+  'two point shots':'Tirs à 2 points', 'three point shots':'Tirs à 3 points', 'fouls':'Fautes', 'personal fouls':'Fautes personnelles',
+  'free throws %':'Réussite aux lancers francs', '2 pointers %':'Réussite à 2 points', '3 pointers %':'Réussite à 3 points', 'field goals %':'Réussite aux tirs',
+  'points in the paint':'Points dans la raquette', 'fast break points':'Points en contre-attaque', 'second chance points':'Points sur seconde chance',
+  'points from turnovers':'Points après perte de balle', 'points off turnovers':'Points après perte de balle', 'bench points':'Points du banc',
+  'biggest lead':'Plus grand écart', 'biggest scoring run':'Plus grande série', 'lead changes':'Changements de leader', 'time spent in lead':'Temps en tête',
+  'scoring':'Tirs et points', 'shooting':'Tirs et points', 'points':'Points', 'rebounds':'Rebonds', 'assists':'Passes décisives',
+  'steals':'Interceptions', 'blocks':'Contres', 'turnovers':'Balles perdues', 'offensive rebounds':'Rebonds offensifs', 'defensive rebounds':'Rebonds défensifs'
+});
+const histLabel = key => histLabels[key] || histLabels[String(key ?? '').trim().toLowerCase().replace(/\s+/g,' ')] || String(key ?? '').replace(/([a-zà-ÿ])([A-Z])/g, '$1 $2').replace(/_/g, ' ').replace(/^./, s => s.toUpperCase());
 const histUnwrap = raw => {
   let data = raw;
   for (let i = 0; i < 4 && data && !Array.isArray(data) && typeof data === 'object' && data.data != null; i++) data = data.data;
@@ -61,6 +73,22 @@ const histMinutes = row => {
   return row.minutesPlayed ?? row.statistics?.minutesPlayed ?? '—';
 };
 const histShot = (stats, made, attempts) => stats[made] != null && stats[attempts] != null ? `${stats[made]}/${stats[attempts]}` : '—';
+
+// EFF classique : aucun lien avec la note rating. Les champs absents ne valent pas zéro.
+function histEvaluation(s) {
+  const nombre = value => value !== null && value !== undefined && value !== '' && typeof value !== 'boolean'
+    && Number.isFinite(Number(value)) && Number.isInteger(Number(value)) ? Number(value) : null;
+  const prendre = (...keys) => { for (const k of keys) { const n = nombre(s[k]); if (n !== null) return n; } return null; };
+  const somme = (a,b) => a !== null && b !== null ? a+b : null;
+  const reb = prendre('rebounds','totalRebounds') ?? somme(prendre('offensiveRebounds'),prendre('defensiveRebounds'));
+  const marques = prendre('fieldGoalsMade') ?? somme(prendre('twoPointsMade'),prendre('threePointsMade'));
+  const tentes = prendre('fieldGoalAttempts') ?? somme(prendre('twoPointAttempts'),prendre('threePointAttempts'));
+  const valeurs = [prendre('points'),reb,prendre('assists'),prendre('steals'),prendre('blocks'),marques,tentes,
+    prendre('freeThrowsMade'),prendre('freeThrowAttempts'),prendre('turnovers')];
+  if (valeurs.some(n => n === null || n < 0) || marques > tentes || valeurs[7] > valeurs[8]) return null;
+  return valeurs[0]+valeurs[1]+valeurs[2]+valeurs[3]+valeurs[4]-(tentes-marques)-(valeurs[8]-valeurs[7])-valeurs[9];
+}
+const histDrapeau = m => m.categorie === 'europe' || [138,141,9357,2165].includes(Number(m.tournoi_id)) ? '🇪🇺' : '🇫🇷';
 
 class BasketHistoriqueCard extends HTMLElement {
   setConfig(config) {
@@ -175,10 +203,10 @@ class BasketHistoriqueCard extends HTMLElement {
       const s = r.statistics || {};
       const valeurs = [histMinutes(r), s.points, histShot(s,'fieldGoalsMade','fieldGoalAttempts'), histShot(s,'twoPointsMade','twoPointAttempts'),
         histShot(s,'threePointsMade','threePointAttempts'), histShot(s,'freeThrowsMade','freeThrowAttempts'), s.rebounds ?? s.totalRebounds,
-        s.assists, s.steals, s.blocks, s.turnovers, s.personalFouls ?? s.fouls, s.plusMinus, s.rating];
+        s.assists, s.steals, s.blocks, s.turnovers, s.personalFouls ?? s.fouls, s.plusMinus, histEvaluation(s)];
       html += `<tr><th scope="row"><span class="numero">${histEscape(r.jerseyNumber ?? r.shirtNumber ?? r.player?.jerseyNumber ?? '')}</span>${histEscape(nom(r))}${r.substitute === false ? '<small>5 de départ</small>' : ''}</th>${valeurs.map(v => `<td>${histEscape(histNumber(v))}</td>`).join('')}</tr>`;
     }
-    html += '</tbody></table></div><p class="legende">MIN : temps joué · PD : passes décisives · INT : interceptions · CTR : contres · BP : balles perdues · FP : fautes personnelles</p>';
+    html += '</tbody></table></div><p class="legende">MIN : temps joué · PD : passes décisives · INT : interceptions · CTR : contres · BP : balles perdues · FP : fautes personnelles · ÉVAL : EFF calculée (points + rebonds + passes + interceptions + contres − tirs ratés − LF ratés − balles perdues). La note fournisseur est distincte ; — si données insuffisantes.</p>';
     html += '<details class="complements"><summary>Tous les indicateurs disponibles par joueur</summary><div class="indicateurs">';
     for (const r of lignes) {
       const valeurs = histFlatten(r.statistics || {});
@@ -186,10 +214,22 @@ class BasketHistoriqueCard extends HTMLElement {
     }
     return html + '</div></details>';
   }
+  _pronos(m) {
+    const p = m.pronostics || {};
+    const cellule = (j, nom, avant) => {
+      const choix = p.pronos?.[j], resultat = p.resultats?.[j];
+      const connu = choix != null && typeof resultat === 'boolean';
+      const points = connu ? histNumber(p.points?.[j] ?? 0) : '—';
+      const couleur = connu ? resultat ? 'prono-gagne' : 'prono-perdu' : 'prono-absent';
+      const titre = connu ? `${nom} : ${choix} · ${resultat ? 'gagné' : 'perdu'}` : `${nom} : aucun pronostic enregistré`;
+      return `<span class="${couleur}" title="${histEscape(titre)}">${avant ? `${nom} ${points}` : `${points} ${nom}`}</span>`;
+    };
+    return `<span class="pronos-match" aria-label="Points des pronostics">${cellule('ilona','Ilona',true)}<span> - </span>${cellule('francis','Francis',false)}</span>`;
+  }
   _ligne(m) {
     const date = new Date(m.debut);
     const nanterre = this._nanterre(m);
-    const ligne = `<div class="result-meta"><span>${histEscape(date.toLocaleDateString('fr-FR', {weekday:'short',day:'numeric',month:'short'}))}</span><span>${histEscape(m.tournoi)}</span>${nanterre ? '<em>Nanterre</em>' : ''}</div>
+    const ligne = `<div class="result-meta"><span>${histEscape(date.toLocaleDateString('fr-FR', {weekday:'short',day:'numeric',month:'short'}))}</span><span>${histDrapeau(m)} ${histEscape(m.tournoi)}</span>${nanterre ? '<em>Nanterre</em>' : ''}${this._pronos(m)}</div>
       <div class="result-score"><span class="equipe-nom ${m.score_dom > m.score_ext ? 'gagnant' : ''}">${histEscape(m.domicile)}</span><strong>${histEscape(histNumber(m.score_dom))}<span>–</span>${histEscape(histNumber(m.score_ext))}</strong><span class="equipe-nom droite ${m.score_ext > m.score_dom ? 'gagnant' : ''}">${histEscape(m.exterieur)}</span>${nanterre ? '<span class="chevron" aria-hidden="true">⌄</span>' : ''}</div>`;
     if (!nanterre) return `<div class="resultat simple">${ligne}</div>`;
     return `<details class="resultat nanterre" data-match="${Number(m.id)}" ${this._ouverts.has(Number(m.id)) ? 'open' : ''}>
@@ -212,7 +252,7 @@ class BasketHistoriqueCard extends HTMLElement {
     }
     if (!corps) corps = '<p class="notice">Aucun résultat archivé pour cette sélection.</p>';
     const importation = attrs.import || {};
-    const messages = {attente_jour_sans_match:'L’import des anciens résultats attend une journée sans match.',
+    const messages = {attente_jour_sans_match:'',
       marge_quota_preservee:'Import en pause pour préserver la marge de quota.', en_cours:'Import progressif de la saison en cours.'};
     const importTexte = importation.erreur ? 'Import partiel : une source est momentanément indisponible.' : messages[importation.etat];
     this.shadowRoot.innerHTML = `<style>${HIST_STYLE}</style><ha-card><header class="hero"><span class="kicker">BASKET LIVE · ARCHIVES</span>
@@ -234,7 +274,8 @@ const HIST_STYLE = `
   .pills button[aria-pressed="true"]{color:var(--vert);border-color:var(--vert);background:#66c87910;}.pills button:focus-visible,summary:focus-visible{outline:2px solid var(--orange);outline-offset:3px;}
   .import-info,.notice,.cache,.legende{font-size:12px;line-height:1.5;color:var(--secondary-text-color,#aab5bf);}.import-info{border-left:2px solid var(--orange);padding-left:10px;}.mois{margin:26px 0 10px;font-size:13px;font-weight:700;text-transform:capitalize;color:var(--secondary-text-color,#aab5bf);}
   .resultat{margin:0 0 8px;border:1px solid var(--divider-color,#333c43);border-radius:12px;overflow:hidden;}.resultat.simple{padding:12px 14px;}.resultat.nanterre{border-left:3px solid var(--vert);}.resultat>summary{padding:12px 14px;list-style:none;cursor:pointer;}.resultat>summary::-webkit-details-marker{display:none;}.resultat[open]>summary{background:#66c8790a;}
-  .result-meta{display:flex;gap:8px;align-items:center;font-size:10px;color:var(--secondary-text-color,#aab5bf);}.result-meta>span:nth-child(2){flex:1;}.result-meta em{font-style:normal;font-size:9px;padding:2px 6px;border-radius:4px;color:var(--vert);background:#66c87912;}
+  .result-meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:10px;color:var(--secondary-text-color,#aab5bf);}.result-meta>span:nth-child(2){flex:1;}.result-meta em{font-style:normal;font-size:9px;padding:2px 6px;border-radius:4px;color:var(--vert);background:#66c87912;}
+  .pronos-match{margin-left:auto;white-space:nowrap;font-size:11px;font-weight:600;}.prono-gagne{color:var(--vert);}.prono-perdu{color:var(--orange);}.prono-absent{color:var(--secondary-text-color,#aab5bf);}
   .result-score{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr) 12px;align-items:center;gap:10px;margin-top:7px;}.simple .result-score{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);}.result-score strong{font-variant-numeric:tabular-nums;font-size:23px;font-weight:800;white-space:nowrap;letter-spacing:-.04em;}.result-score strong span{font-size:15px;color:var(--secondary-text-color,#aab5bf);padding:0 7px;}
   .equipe-nom{font-size:13px;line-height:1.35;overflow-wrap:anywhere;}.equipe-nom.droite{text-align:right;}.gagnant{font-weight:700;}.chevron{color:var(--vert);font-size:19px;transition:transform .15s;}.resultat[open] .chevron{transform:rotate(180deg);}
   .details-match{padding:0 16px 16px;border-top:1px solid var(--divider-color,#333c43);}.stat-section{margin-top:24px;}h3{font-size:15px;margin:0 0 10px;}h4{font-size:11px;letter-spacing:.03em;color:var(--secondary-text-color,#aab5bf);margin:20px 0 12px;}.equipes-stats{display:flex;justify-content:space-between;gap:16px;font-size:11px;font-weight:700;}.equipes-stats span:last-child{text-align:right;}

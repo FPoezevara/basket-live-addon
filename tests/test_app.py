@@ -195,3 +195,90 @@ def test_decouverte():
     assert conf["json_attributes_topic"] == "basket_live/lives_en_cours/attributs"
     bouton = json.loads(msgs["homeassistant/button/basket_live/rafraichir_le_calendrier/config"])
     assert "state_topic" not in bouton and bouton["payload_press"] == "rafraichir"
+
+
+def test_horizon_sept_jours_publication_et_limite_exclusive(tmp_path):
+    from datetime import timedelta
+    h = Horloge(T)
+    app, bus = faire_app(tmp_path, FausseApi(), h)
+    jour = app.aujourdhui()
+    for i in range(8):
+        ts = T + i*86400 + 3600
+        app.fusionner([evenement(800+i, ELITE, equipe(1,'A'), equipe(2,'B'), int(ts))], jour+timedelta(days=i))
+    app.publier()
+    matchs = json.loads(bus.retenus['basket_live/matchs_a_venir/attributs'])['matchs']
+    assert {m['id'] for m in matchs} == set(range(800,807))
+
+
+def test_horizon_cinq_appels_par_jour_pas_de_rafale_ni_relecture_au_redemarrage(tmp_path):
+    from datetime import timedelta
+    h = Horloge(T)
+    api = FausseApi()
+    app, _ = faire_app(tmp_path, api, h)
+    asyncio.run(app.rafraichir_horizon())
+    assert not api.appels
+    for _ in range(5):
+        h.t += 60
+        asyncio.run(app.rafraichir_horizon())
+        avant = len(api.appels)
+        asyncio.run(app.rafraichir_horizon())
+        assert len(api.appels) == avant
+    assert [a[1] for a in api.appels] == [(app.aujourdhui()+timedelta(days=i)).isoformat() for i in range(2,7)]
+    api2 = FausseApi()
+    autre, _ = faire_app(tmp_path, api2, h)
+    autre.charger_etat()
+    h.t += 60
+    asyncio.run(autre.rafraichir_horizon())
+    assert not api2.appels
+    autre.elaguer()
+    assert set(autre.dernier_calendrier) == set(app.dernier_calendrier)
+    h.t += 86400
+    asyncio.run(autre.rafraichir_horizon())
+    assert len(api2.appels) == 1
+
+
+def test_horizon_preserve_reserve_et_attend_une_heure_apres_echec(tmp_path):
+    h = Horloge(T)
+    api = FausseApi()
+    app, _ = faire_app(tmp_path, api, h)
+    h.t += 60
+    api.compteur = 85
+    asyncio.run(app.rafraichir_horizon())
+    assert not api.appels
+    api.compteur = 84
+    async def panne(jour, priorite='fond'):
+        api.compter();api.appels.append(jour)
+        return None
+    api.calendrier = panne
+    asyncio.run(app.rafraichir_horizon())
+    assert api.compteur == 85 and len(api.appels) == 1
+    api.compteur = 0
+    h.t += 60
+    asyncio.run(app.rafraichir_horizon())
+    assert len(api.appels) == 1
+    h.t += 3600
+    asyncio.run(app.rafraichir_horizon())
+    assert len(api.appels) == 2
+
+
+def test_pronos_des_resultats_complets_sans_limite_de_50_ni_divulgation_future(tmp_path):
+    h = Horloge(T+600)
+    app, bus = faire_app(tmp_path, FausseApi(), h)
+    jour = app.aujourdhui()
+    e = ev_elite_fini()
+    app.fusionner([e], jour)
+    mid = e['id']
+    app.pronos.historique = [{'id':mid,'termine':True,'pronos':{'ilona':'A','francis':'B'},
+                             'resultats':{'ilona':True,'francis':False},'points':{'ilona':2,'francis':0}}]
+    app.pronos.historique += [{'id':9000+i,'termine':True,'pronos':{},'resultats':{},'points':{},'saison':'2026-2027'} for i in range(60)]
+    app.pronos.historique[0]['saison'] = '2026-2027'
+    app.publier()
+    recent = json.loads(bus.retenus['basket_live/resultats/attributs'])['matchs'][0]
+    saison = json.loads(bus.retenus['basket_live/resultats_saison/attributs'])['matchs'][0]
+    assert recent['pronostics']['points'] == {'ilona':2,'francis':0}
+    assert saison['pronostics'] == recent['pronostics']
+    app.fusionner([evenement(808, ELITE, equipe(1,'A'), equipe(2,'B'), int(T+86400))], jour+__import__('datetime').timedelta(days=1))
+    app.pronos.choix[808] = {'ilona':'dom'}
+    app.publier()
+    futur = json.loads(bus.retenus['basket_live/matchs_a_venir/attributs'])['matchs'][0]
+    assert 'pronostics' not in futur

@@ -126,6 +126,11 @@ class Pronos:
         del self.choix[m.id]
         return e
 
+    def resultats_par_match(self) -> dict[int, dict]:
+        """Résultats figés complets, indépendants des 50 entrées de la tuile pronostics."""
+        return {int(h['id']): {k: h.get(k, {}) for k in ('pronos', 'resultats', 'points')}
+                for h in self.historique if h.get('termine')}
+
     def classement(self, saison_courante: str) -> list[dict]:
         lignes = {j: {"nom": j.capitalize(), "points": 0, "bons": 0, "pronos": 0} for j in self.joueurs}
         for h in self.historique:

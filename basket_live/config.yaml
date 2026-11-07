@@ -1,5 +1,5 @@
 name: Basket Live
-version: "0.5.1"
+version: "0.6.0"
 slug: basket_live
 description: Scores en direct de la Betclic Élite, de Nanterre et des clubs français en coupe d'Europe, publiés dans MQTT
 url: https://github.com/FPoezevara/basket-live-addon

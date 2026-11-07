@@ -323,21 +323,22 @@ class Archives:
         log.warning('Import saison %s, %s %s : %s ; prochain essai dans 24 h au plus tôt',
                     self.saison, job['type'], job['id'], message)
 
-    def attributs(self, maintenant: float, import_autorise: bool, api) -> dict:
+    def attributs(self, maintenant: float, import_autorise: bool, api, pronostics=None) -> dict:
         termine = all(j.get('termine') for j in self.jobs)
         etat = ('termine' if termine else 'attente_jour_sans_match' if not import_autorise
                 else 'marge_quota_preservee' if api.compteur >= self.plafond_import(api) else 'en_cours')
         return {'saison': self.saison, 'equipe_nanterre': self.criteres.equipe,
-                'matchs': [vue(m, self.tz, maintenant, extrapoler=False)
+                'matchs': [{**vue(m, self.tz, maintenant, extrapoler=False),
+                            'pronostics': (pronostics or {}).get(m.id, {})}
                            for m in sorted(self.resultats.values(), key=lambda m: m.debut_ts, reverse=True)],
                 'import': {'etat': etat, 'sources_terminees': sum(bool(j.get('termine')) for j in self.jobs),
                            'sources_total': len(self.jobs),
                            'erreur': next((j['erreur'] for j in self.jobs if not j.get('termine') and j.get('erreur')), '')}}
 
-    def messages(self, maintenant: float, import_autorise: bool, api) -> list[tuple[str, str]]:
+    def messages(self, maintenant: float, import_autorise: bool, api, pronostics=None) -> list[tuple[str, str]]:
         from . import VERSION
         from .bus import APPAREIL, DISPO, topic_attributs, topic_etat
-        attributs = self.attributs(maintenant, import_autorise, api)
+        attributs = self.attributs(maintenant, import_autorise, api, pronostics)
         messages = [(topic_etat("resultats_saison"), str(len(attributs["matchs"]))),
                     (topic_attributs("resultats_saison"), json.dumps(attributs, ensure_ascii=False))]
         for mid, d in self.details.items():

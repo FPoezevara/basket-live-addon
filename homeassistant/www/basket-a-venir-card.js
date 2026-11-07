@@ -1,5 +1,5 @@
 /*
- * Carte « Aujourd'hui et demain » : boutons Live personnels et pronostics à trois positions.
+ * Carte « Les 7 prochains jours » : boutons Live personnels et pronostics à trois positions.
  *
  * Emplacement : /config/www/basket-a-venir-card.js, ressource /local/basket-a-venir-card.js (module).
  * Données : matchs à venir/en cours, choix de sensor.basket_live_suivis_<joueur>, et menus select publiés par
@@ -12,7 +12,7 @@
  *     7521abea3321478f8c461ee465767fcb: ilona
  */
 
-const VERSION = "1.2.0";
+const VERSION = "1.3.0";
 const EUROPE = new Set([138, 141, 9357, 2165]);
 const AUCUN = "—";
 
@@ -393,7 +393,7 @@ window.customCards = window.customCards || [];
 window.customCards.push(
   {
     type: "basket-a-venir-card",
-    name: "Basket Live · Aujourd'hui et demain",
+    name: "Basket Live · Les 7 prochains jours",
     description: "Matchs à venir et en cours, boutons Live personnels et pronostics.",
   },
   { type: "basket-entete-card", name: "Basket Live · En-tête", description: "Titre sur fond de terrain de basket." },

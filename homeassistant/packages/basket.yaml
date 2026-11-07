@@ -65,12 +65,13 @@ script:
         value_template: >-
           {{ personne in ['francis', 'ilona'] and (match_id | int(0)) > 0
              and actif is boolean }}
-      - action: mqtt.publish
-        data:
-          topic: "basket_live/suivi/{{ personne }}/{{ match_id | int }}/set"
-          payload: "{{ 'ON' if actif else 'OFF' }}"
-          qos: 1
-          retain: false
+      # L'événement conserve le contexte du compte connecté. L'automatisation
+      # ci-dessous contrôle l'identité puis publie une commande MQTT bornée.
+      - event: basket_live_selection_demandee
+        event_data:
+          personne: "{{ personne }}"
+          match_id: "{{ match_id | int }}"
+          actif: "{{ actif }}"
 
   basket_prono_rappeler:
     alias: Basket - rappeler les pronostics manquants
@@ -311,6 +312,36 @@ script:
             tag: "basket_{{ match_id }}"
 
 automation:
+  - id: basket_live_selection_autorisee
+    alias: Basket - transmettre un choix Live personnel
+    description: Autorise chaque compte à modifier ses propres suivis, puis transmet à MQTT
+    mode: queued
+    max: 50
+    triggers:
+      - trigger: event
+        event_type: basket_live_selection_demandee
+    variables:
+      # Même correspondance que joueurs: dans dashboard-basket.yaml.
+      comptes:
+        c2af4c5a136e448ab37deaae63146536: francis
+        7521abea3321478f8c461ee465767fcb: ilona
+    conditions:
+      - condition: template
+        value_template: >-
+          {% set d = trigger.event.data %}
+          {% set uid = trigger.event.context.user_id %}
+          {{ d.personne | default('') in ['francis', 'ilona']
+             and d.match_id is defined and (d.match_id | int(0)) > 0
+             and d.actif is defined and d.actif is boolean
+             and (uid is none or comptes.get(uid) == d.personne) }}
+    actions:
+      - action: mqtt.publish
+        data:
+          topic: "basket_live/suivi/{{ trigger.event.data.personne }}/{{ trigger.event.data.match_id | int }}/set"
+          payload: "{{ 'ON' if trigger.event.data.actif else 'OFF' }}"
+          qos: 1
+          retain: false
+
   - id: basket_live_evenements
     alias: Basket - lives et résultats
     description: Relaie les événements de l'add-on selon les préférences de chacun

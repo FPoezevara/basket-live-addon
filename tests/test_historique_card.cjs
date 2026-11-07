@@ -37,7 +37,7 @@ test('onglet de saison, tous les résultats et accordéon exclusivement Nanterre
   assert.match(card.shadowRoot.innerHTML,/details class="resultat nanterre" data-match="1"/);
   assert.match(card.shadowRoot.innerHTML,/div class="resultat simple"/);
   assert.doesNotMatch(card.shadowRoot.innerHTML,/details[^>]*data-match="2"/);
-  assert.match(card.shadowRoot.innerHTML,/journée sans match/);
+  assert.doesNotMatch(card.shadowRoot.innerHTML,/L’import des anciens résultats/);
 });
 
 test('statistiques équipes et joueurs, valeurs zéro et champs supplémentaires sans perte',()=>{
@@ -85,7 +85,7 @@ test('absence de données, collecte différée ou interrompue : messages explici
   const e=hass.states['sensor.basket_live_statistiques_1'];
   e.attributes={match_id:1,type:'basket_statistiques',historique:true,statistics:{etat:'en_attente'},lineups:{etat:'indisponible'}};
   e.last_updated='3';card.hass=hass;
-  assert.match(card.shadowRoot.innerHTML,/journée sans match/);
+  assert.doesNotMatch(card.shadowRoot.innerHTML,/L’import des anciens résultats/);
   assert.match(card.shadowRoot.innerHTML,/collecte unique/);
   e.attributes.statistics.etat='interrompu';e.last_updated='4';card.hass=hass;
   assert.match(card.shadowRoot.innerHTML,/Aucun nouvel appel automatique/);
@@ -101,4 +101,47 @@ test('données échappées et sensor renommé retrouvé par attributs',()=>{
   assert.match(card.shadowRoot.innerHTML,/&lt;img/);
   assert.doesNotMatch(card.shadowRoot.innerHTML,/<img src=x/);
   assert.match(card.shadowRoot.innerHTML,/Joueur Nanterre/);
+});
+
+
+test('évaluation EFF distincte de rating, trois notes identiques ne donnent pas trois évaluations identiques',()=>{
+  const {contexte}=fixture();
+  const evaluer = s => vm.runInContext(`histEvaluation(${JSON.stringify(s)})`,contexte);
+  const base={points:12,rebounds:4,assists:3,steals:1,blocks:1,fieldGoalsMade:5,fieldGoalAttempts:10,
+    freeThrowsMade:2,freeThrowAttempts:3,turnovers:2,rating:7.7};
+  assert.equal(evaluer(base),13);
+  assert.equal(evaluer({...base,points:20}),21);
+  assert.equal(evaluer({...base,points:0}),1);
+  assert.equal(evaluer({...base,steals:undefined}),null);
+  assert.equal(evaluer({rating:7.7}),null);
+  assert.equal(evaluer({...base,fieldGoalsMade:11}),null);
+  assert.equal(evaluer({...base,points:0,rebounds:0,assists:0,steals:0,blocks:0}),-8);
+  assert.equal(evaluer({...base,fieldGoalsMade:undefined,fieldGoalAttempts:undefined,twoPointsMade:3,threePointsMade:2,
+    twoPointAttempts:6,threePointAttempts:4}),13);
+});
+
+test('points personnels gagnés et perdus, drapeaux et absence de pronostic neutre',()=>{
+  const {card,hass}=fixture();
+  const matchs=hass.states['sensor.basket_live_resultats_saison'].attributes.matchs;
+  matchs[0].pronostics={pronos:{ilona:'Nanterre',francis:'Paris'},resultats:{ilona:true,francis:false},points:{ilona:3,francis:0}};
+  matchs[1].tournoi_id=138;
+  hass.states['sensor.basket_live_resultats_saison'].last_updated='10';card.hass=hass;
+  const html=card.shadowRoot.innerHTML;
+  assert.match(html,/class="prono-gagne"[^>]*>Ilona 3/);
+  assert.match(html,/class="prono-perdu"[^>]*>0 Francis/);
+  assert.match(html,/class="prono-absent"[^>]*>Ilona —/);
+  assert.match(html,/🇫🇷/);assert.match(html,/🇪🇺/);
+  assert.doesNotMatch(html,/L’import des anciens résultats/);
+});
+
+test('traductions des statistiques et note fournisseur séparée de l’évaluation',()=>{
+  const {card,hass,contexte}=fixture();
+  for(const [nom,fr] of [['Free throws','Lancers francs'],['2 pointers','Tirs à 2 points'],['3 pointers','Tirs à 3 points'],['Fouls','Fautes']]) {
+    assert.equal(vm.runInContext(`histLabel(${JSON.stringify(nom)})`,contexte),fr);
+  }
+  const d=hass.states['sensor.basket_live_statistiques_1'];
+  d.attributes.lineups.reponse.data.home.players[0].statistics.rating=7.7;
+  d.last_updated='15';card.hass=hass;
+  assert.match(card.shadowRoot.innerHTML,/Note fournisseur/);
+  assert.doesNotMatch(card.shadowRoot.innerHTML,/<td>7,7<\/td>/);
 });

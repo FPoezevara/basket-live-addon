@@ -67,6 +67,7 @@ class App:
         self.verrou_instantane = asyncio.Lock()
         self.dernier_secours: dict[str, float] = {}
         self.ws_connecte = False
+        self.prochain_calendrier_lointain = self.horloge() + 60
         self.demande_rafraichir = False
         self.dernier_rafraichir_manuel = 0.0
         self.creneaux_faits: set[str] = set()
@@ -157,6 +158,8 @@ class App:
         self.matchs = {m.id: m for m in (Match.depuis_dict(d) for d in etat.get("matchs", []))}
         self.resultats = [Match.depuis_dict(d) for d in etat.get("resultats", [])]
         self.dernier_calendrier = etat.get("dernier_calendrier", {})
+        self.prochain_calendrier_lointain = max(self.prochain_calendrier_lointain,
+                                                etat.get("prochain_calendrier_lointain", 0))
         self.pronos.charger(etat.get("pronos", {}))
         self.suivis.charger(etat.get("suivis", {}))
         self.notifications.charger(etat.get("notifications", {}))
@@ -174,6 +177,7 @@ class App:
             "matchs": [asdict(m) for m in self.matchs.values()],
             "resultats": [asdict(m) for m in self.resultats],
             "dernier_calendrier": self.dernier_calendrier,
+            "prochain_calendrier_lointain": self.prochain_calendrier_lointain,
             "pronos": self.pronos.vers_dict(),
             "suivis": self.suivis.vers_dict(),
             "notifications": self.notifications.vers_dict(),
@@ -196,7 +200,7 @@ class App:
         self.resultats = [m for m in self.resultats if (m.termine_ts or 0) >= limite]
         self.pronos.nettoyer(set(self.matchs))
         self.suivis.nettoyer({i for i, m in self.matchs.items() if not m.termine})
-        garder = {jour.isoformat(), (jour + timedelta(days=1)).isoformat()}
+        garder = {(jour + timedelta(days=i)).isoformat() for i in range(7)}
         self.dernier_calendrier = {j: t for j, t in self.dernier_calendrier.items() if j in garder}
         if len(self.matchs) != avant:
             log.info("Élagage : %s matchs retirés", avant - len(self.matchs))
@@ -265,7 +269,7 @@ class App:
         self.actualiser_notifications()
         maintenant = self.horloge()
         jour = self.aujourdhui()
-        jours = {jour, jour + timedelta(days=1)}
+        jours = {jour + timedelta(days=i) for i in range(7)}
         a_venir = sorted((m for m in self.matchs.values()
                           if not m.termine and m.code not in CODES_EN_COURS and m.code != CODE_TERMINE
                           and date_locale(m.debut_ts, self.tz) in jours), key=lambda m: m.debut_ts)
@@ -273,13 +277,15 @@ class App:
                         if not m.termine and (m.code in CODES_EN_COURS or m.code == CODE_TERMINE)),
                        key=lambda m: m.debut_ts)
         resultats = sorted(self.resultats, key=lambda m: m.termine_ts or 0, reverse=True)
+        pronostics = self.pronos.resultats_par_match()
 
         from .bus import topic_attributs, topic_etat
         # Pour les capteurs, le chrono est celui de la dernière donnée reçue (pas d'extrapolation) :
         # sinon les attributs changeraient à chaque seconde et rempliraient le recorder.
         for objet, liste in (("matchs_a_venir", a_venir), ("lives_en_cours", lives), ("resultats", resultats)):
             self.bus.poser(topic_etat(objet), str(len(liste)))
-            vues = [vue(m, self.tz, maintenant, extrapoler=False) for m in liste]
+            vues = [{**vue(m, self.tz, maintenant, extrapoler=False),
+                     **({"pronostics": pronostics.get(m.id, {})} if m.termine else {})} for m in liste]
             self.bus.poser(topic_attributs(objet), json.dumps({"matchs": vues}, ensure_ascii=False))
         self.bus.poser(topic_etat("requetes_du_jour"), str(self.api.compteur))
         self.bus.poser(topic_etat("websocket"), "ON" if self.ws_connecte else "OFF")
@@ -294,7 +300,7 @@ class App:
         echeances = self.notifications.attributs()
         self.bus.poser(topic_etat("notifications"), str(len(echeances["echeances"])))
         self.bus.poser(topic_attributs("notifications"), json.dumps(echeances, ensure_ascii=False))
-        for topic, payload in self.archives.messages(maintenant, self.import_archives_autorise(), self.api):
+        for topic, payload in self.archives.messages(maintenant, self.import_archives_autorise(), self.api, pronostics):
             self.bus.poser(topic, payload)
         if self.dernier_calendrier:
             dernier = max(self.dernier_calendrier.values())
@@ -607,6 +613,22 @@ class App:
             if self.horloge() - self.dernier_calendrier.get(j.isoformat(), 0) > 1800:
                 await self.rafraichir(j)
 
+    async def rafraichir_horizon(self) -> None:
+        """J+2 à J+6 une fois par jour local, y compris après redémarrage."""
+        maintenant = self.horloge()
+        if maintenant < self.prochain_calendrier_lointain or not self.api.disponible(FOND):
+            return
+        jour = self.aujourdhui()
+        for i in range(2, 7):
+            cible = jour + timedelta(days=i)
+            dernier = self.dernier_calendrier.get(cible.isoformat())
+            if dernier is not None and date_locale(dernier, self.tz) == jour:
+                continue
+            succes = await self.rafraichir(cible)
+            self.prochain_calendrier_lointain = maintenant + (60 if succes else 3600)
+            self.sauver_etat()  # calendrier réussi et attente après échec survivent au redémarrage
+            return  # un appel maximum, sans rafale au démarrage
+
     async def planifier(self) -> None:
         maintenant = self.horloge()
         local = datetime.fromtimestamp(maintenant, self.tz)
@@ -651,6 +673,7 @@ class App:
         await self.verifier_live()
         await self.verifier_secours()
         await self.verifier_fins()
+        await self.rafraichir_horizon()
         if await self.archives.traiter(self.api, import_autorise=self.import_archives_autorise(),
                                         maintenant=self.horloge()):
             self.marquer()

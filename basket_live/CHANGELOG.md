@@ -1,5 +1,14 @@
 # Journal des versions
 
+## 0.6.0
+
+- Corrige la colonne ÉVAL : `rating` n’est plus présenté comme une évaluation basket. Calcul local de l’EFF classique à partir des statistiques complètes ; note fournisseur conservée dans les détails, champs manquants indiqués par « — ».
+- Matchs à venir sur sept jours calendaires, aujourd’hui inclus. J+2 à J+6 actualisés une fois par jour, au plus une requête/minute ; progression et attente d’une heure après échec persistées. Cinq appels de calendrier supplémentaires en routine, dans le budget existant.
+- Résultats des sept derniers jours enrichis des choix, succès/échecs et points personnels.
+- Historique : points « Ilona X - X Francis » colorés sur la ligne de métadonnées, drapeaux français/européens, traductions des tirs et fautes, retrait de la phrase d’attente d’import.
+- Publication des pronostics attachés aux résultats depuis l’historique complet, indépendamment de la limite de 50 entrées de la tuile pronostics.
+- Cartes à venir 1.3.0 et historique 1.1.0 ; dashboard et ressources à mettre à jour. Package fourni avec le correctif des droits Live d’Ilona.
+
 ## 0.5.1
 
 - Commande MQTT `tester_archive_nanterre` pour tester un seul match historique terminé de Nanterre, y compris un jour de match.

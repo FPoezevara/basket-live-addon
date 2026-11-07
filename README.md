@@ -9,6 +9,7 @@ L'add-on publie les données et conserve les choix de suivi personnels. Préfér
 | Quand | Requête | Rôle |
 |---|---|---|
 | 0 h 05, et au démarrage | 2 calendriers (aujourd'hui, demain) | Sélection des matchs suivis |
+| J+2 à J+6, une fois par jour local | 5 calendriers au total, espacés d’au moins 1 minute | Horizon aujourd’hui + six jours ; progression conservée après redémarrage |
 | 12 h 05 et 17 h 05 | 1 calendrier | Horaires modifiés, reports |
 | 15 min avant un match suivi | 1 instantané live | Scores et statuts en temps réel |
 | 5 min après un « terminé » stable | 1 calendrier (pour toute la vague) | Confirmation du score final |
@@ -152,7 +153,7 @@ nouveaux appels REST de l'add-on jusqu'au lendemain UTC.
 
 ## Boutons Live personnels (0.3.0)
 
-La carte `basket-a-venir-card` 1.2.0 affiche les matchs à venir et en cours, avec un bouton Live
+La carte `basket-a-venir-card` 1.3.0 affiche les matchs à venir et en cours, avec un bouton Live
 à droite de l'heure et de la compétition : texte et contour blancs au repos, orange si le suivi
 est actif. Un appui active, le suivant désactive. Chaque compte HA utilise la correspondance
 `joueurs` déjà configurée pour les pronostics : Francis et Ilona ont chacun leurs choix, et peuvent
@@ -213,3 +214,13 @@ a lu la notification. Le protocole évite les doublons usuels ; il ne peut pas r
 l'envoi à un téléphone et la sauvegarde de son acquittement lors d'une coupure entre les deux.
 
 Voir [homeassistant/INSTALLATION-NOTIFICATIONS.md](homeassistant/INSTALLATION-NOTIFICATIONS.md).
+
+## Évolutions 0.6.0 : semaine, évaluations et pronostics
+
+La carte des matchs à venir couvre **aujourd’hui et les six jours suivants**. Aujourd’hui et demain gardent leur cadence d’actualisation ; les cinq autres journées sont récupérées une fois par jour local et espacées d’au moins une minute. Les calendriers de routine passent ainsi de 4 à 9 requêtes par jour, hors redémarrage, rafraîchissements manuels et rattrapages. Tous les appels restent dans le compteur existant et la réserve essentielle est préservée. Une récupération lointaine échouée attend une heure avant un nouvel essai ; cette attente et les journées déjà récupérées sont persistées. Le remplissage initial des cinq jours supplémentaires prend environ cinq minutes.
+
+La colonne ÉVAL de l’historique présentait à tort `rating`, une note fournisseur. Elle affiche désormais l’**EFF classique calculée** : points + rebonds + passes + interceptions + contres − tirs ratés − lancers francs ratés − balles perdues. Cette mesure est distincte du PIR d’EuroLeague. Le calcul utilise exclusivement les statistiques déjà en cache ; s’il manque un champ nécessaire ou si les tirs sont incohérents, la valeur reste « — ». Les valeurs négatives et les zéros sont conservés. La note `rating` reste consultable sous « Note fournisseur » dans les indicateurs détaillés.
+
+Les résultats récents affichent sous chaque match le choix et les points de chaque personne. L’historique affiche à droite de la première ligne **Ilona X - X Francis**, en vert pour un pronostic gagné, en orange pour un pronostic perdu, et « — » neutre en l’absence de pronostic enregistré. Les données proviennent de l’historique complet persistant des pronostics, et non de la tuile limitée à 50 entrées. Un résultat ancien importé ne crée jamais de points rétroactifs. Drapeaux et traductions des tirs/fautes complètent l’affichage ; la phrase d’attente d’import est supprimée.
+
+Installer le dashboard mis à jour et les deux ressources **module** : `/local/basket-a-venir-card.js?v=1.3.0` et `/local/basket-historique-card.js?v=1.1.0`. Le package fourni conserve le correctif des boutons Live pour Ilona. Guide : [Installation 0.6.0](homeassistant/INSTALLATION-0.6.0.md).

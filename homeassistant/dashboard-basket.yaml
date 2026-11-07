@@ -1,8 +1,8 @@
 # Tableau de bord « Basket » (URL : dashboard-basket), tel qu'exporté par l'éditeur de HA le 05/11/2026.
 # À coller dans : tableau de bord > crayon > ⋮ > Éditeur de configuration brute.
 # Visibilité par utilisateur : Francis c2af4c5a…, Ilona 7521abea… (user_id HA).
-# Ressource supplémentaire : /local/basket-historique-card.js?v=1.0.0 (module).
-# Ressource requise : /local/basket-a-venir-card.js?v=1.2.0 (module), copie de www/basket-a-venir-card.js.
+# Ressource supplémentaire : /local/basket-historique-card.js?v=1.1.0 (module).
+# Ressource requise : /local/basket-a-venir-card.js?v=1.3.0 (module), copie de www/basket-a-venir-card.js.
 title: Basket
 views:
   - title: Direct
@@ -55,7 +55,7 @@ views:
 
               {% endfor %}
           - type: heading
-            heading: Aujourd'hui et demain
+            heading: Les 7 prochains jours
             icon: mdi:calendar-clock
           - type: custom:basket-a-venir-card
             joueurs:
@@ -66,35 +66,30 @@ views:
             icon: mdi:scoreboard
           - type: markdown
             content: >-
-              {% set jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi',
-              'Samedi', 'Dimanche'] %}
-
+              {% set jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'] %}
               {% set eu = [138, 141, 9357, 2165] %}
-
-              {% set l = state_attr('sensor.basket_live_resultats', 'matchs') or
-              [] %}
-
+              {% set l = state_attr('sensor.basket_live_resultats', 'matchs') or [] %}
+              {% macro prono(p, joueur, nom) -%}
+                {%- set choix = p.get('pronos', {}).get(joueur) -%}
+                {%- set resultat = p.get('resultats', {}).get(joueur) -%}
+                {%- if choix is none or resultat is none -%}{{ nom }} : —
+                {%- elif resultat -%}<font color="#2e7d32">{{ nom }} : ✔ {{ choix | e }} (+{{ p.get('points', {}).get(joueur, 0) }})</font>
+                {%- else -%}<font color="#e86d1f">{{ nom }} : ✘ {{ choix | e }} (0 pt)</font>
+                {%- endif -%}
+              {%- endmacro %}
               {% if l | count == 0 %}*Aucun résultat.*{% endif %}
-
               {% set ns = namespace(jour='') %}
-
               {% for m in l | sort(attribute='debut', reverse=true) %}
-
               {% set d = as_datetime(m.debut) | as_local %}
-
               {% set j = jours[d.weekday()] ~ ' ' ~ d.strftime('%d/%m') %}
-
               {% if j != ns.jour %}{% set ns.jour = j %}
-
 
               **{{ j }}**
 
               {% endif %}
 
-              - {{ m.domicile }} **{{ m.score_dom }} - {{ m.score_ext }}** {{
-              m.exterieur }}{{ ' a.p.' if m.prolongation_dom is not none else ''
-              }} ({{ '🇪🇺' if m.tournoi_id in eu else '🇫🇷' }} {{ m.tournoi
-              }})
+              - {{ m.domicile | e }} **{{ m.score_dom }} - {{ m.score_ext }}** {{ m.exterieur | e }}{{ ' a.p.' if m.prolongation_dom is not none else '' }} ({{ '🇪🇺' if m.tournoi_id in eu else '🇫🇷' }} {{ m.tournoi | e }})<br>
+                <small>{{ prono(m.pronostics | default({}), 'ilona', 'Ilona') }} · {{ prono(m.pronostics | default({}), 'francis', 'Francis') }}</small>
 
               {% endfor %}
       - type: grid
