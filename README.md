@@ -112,6 +112,21 @@ Pour chaque match à venir et chaque joueur (option `joueurs`), l'add-on publie 
 
 Saison du 1er juillet au 30 juin. Les pronostics de l'autre ne sont cachés que sur le tableau de bord : HA n'a pas de droits par entité.
 
+### Corriger un pronostic après coup (0.7.2)
+
+Un pronostic perdu ou erroné sur un match **terminé** se corrige par une commande JSON sur `basket_live/commande`. `choix` reprend le libellé du menu (nom court de l'équipe) ou `—` pour retirer le pronostic. Les points, le résultat et le classement sont recalculés avec le barème du match ; si personne n'avait pronostiqué, l'entrée est créée. Un match non terminé, un joueur ou un libellé inconnu sont refusés et journalisés.
+
+```yaml
+action: mqtt.publish
+data:
+  topic: basket_live/commande
+  payload: '{"action": "corriger_prono", "match_id": 16989040, "joueur": "ilona", "choix": "Le Mans"}'
+  qos: 1
+  retain: false
+```
+
+Journal attendu : `Pronostic corrigé : ilona sur … : Le Mans, points {…}`.
+
 ## Côté Home Assistant
 
 `homeassistant/packages/basket.yaml` (préférences, lives, résultats, sélecteurs) et `homeassistant/dashboard-basket.yaml` (tableau de bord) sont la référence versionnée de ce qui est installé dans `/homeassistant`.

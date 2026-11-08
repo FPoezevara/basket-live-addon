@@ -1,5 +1,9 @@
 # Journal des versions
 
+## 0.7.2
+
+- Commande MQTT `corriger_prono` pour corriger a posteriori le pronostic d'un joueur sur un match terminé : points, résultats et classement recalculés, correction journalisée et sauvegardée. Aucun appel SportsAPI.
+
 ## 0.7.1
 
 - Commande MQTT `rafraichir_classements` pour relancer une fois par jour les tableaux Élite et BCL dans la marge de quota.

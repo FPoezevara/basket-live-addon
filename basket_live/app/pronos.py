@@ -46,11 +46,15 @@ def gagnant(m: Match) -> str | None:
     return "dom" if m.score_dom > m.score_ext else "ext"
 
 
-def libelles(m: Match) -> dict[str, str]:
-    dom, ext = nom_court(m.domicile), nom_court(m.exterieur)
+def libelles_noms(domicile: str, exterieur: str) -> dict[str, str]:
+    dom, ext = nom_court(domicile), nom_court(exterieur)
     if dom == ext:
         dom, ext = f"{dom} (dom.)", f"{ext} (ext.)"
     return {"dom": dom, "ext": ext}
+
+
+def libelles(m: Match) -> dict[str, str]:
+    return libelles_noms(m.domicile, m.exterieur)
 
 
 class Pronos:
@@ -125,6 +129,38 @@ class Pronos:
         self.historique = [h for h in self.historique if h["id"] != m.id] + [e]
         del self.choix[m.id]
         return e
+
+    def corriger(self, match_id: int, joueur: str, libelle: str, m: Match | None, tz: ZoneInfo) -> dict | None:
+        """Correction manuelle d'un pronostic sur un match terminé, points recalculés.
+
+        `libelle` suit les options du menu (nom court d'une équipe, ou « — » pour aucun).
+        Si le match terminé n'a pas d'entrée (personne n'avait pronostiqué), elle est créée
+        à partir du résultat `m`. Renvoie l'entrée corrigée, ou None si la correction est refusée.
+        """
+        if joueur not in self.joueurs:
+            return None
+        h = next((h for h in self.historique if int(h["id"]) == match_id and h.get("termine")), None)
+        if h is None:
+            if m is None or not m.termine or m.id in self.choix or libelle == AUCUN:
+                return None
+            cotes = {v: k for k, v in libelles(m).items()}
+            if libelle not in cotes:
+                return None
+            self.choix[m.id] = {joueur: cotes[libelle]}
+            return self.resultat(m, tz)
+        noms = libelles_noms(h["domicile"], h["exterieur"])
+        cotes = {v: k for k, v in noms.items()}
+        if libelle == AUCUN:
+            cote = None
+        elif libelle in cotes:
+            cote = cotes[libelle]
+        else:
+            return None
+        g = cotes.get(h.get("vainqueur"))
+        h.setdefault("pronos", {})[joueur] = noms[cote] if cote else None
+        h.setdefault("resultats", {})[joueur] = None if g is None or cote is None else cote == g
+        h.setdefault("points", {})[joueur] = h["points_en_jeu"] if g is not None and cote == g else 0
+        return h
 
     def resultats_par_match(self) -> dict[int, dict]:
         """Résultats figés complets, indépendants des 50 entrées de la tuile pronostics."""

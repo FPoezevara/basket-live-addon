@@ -101,6 +101,49 @@ def test_saisie_verrou_points_et_classement(tmp_path):
     assert len(app2.pronos.historique) == 2
 
 
+def test_correction_a_posteriori(tmp_path):
+    h = Horloge(T - 3600)
+    app, bus = faire(tmp_path, h)
+    app.sur_commande("basket_live/prono/francis/1/set", "Nanterre")
+    app.sur_commande("basket_live/prono/ilona/1/set", "Bourg-en-Bresse")
+    app.sur_commande("basket_live/prono/ilona/1/set", AUCUN)          # pronostic perdu avant l'entre-deux
+    cmd = lambda **d: app.sur_commande("basket_live/commande", json.dumps({"action": "corriger_prono", **d}))
+    # Refusée tant que le match n'est pas terminé
+    cmd(match_id=1, joueur="ilona", choix="Bourg-en-Bresse")
+    assert "ilona" not in app.pronos.choix[1]
+
+    h.t = T + 60
+    m1, m2 = app.matchs[1], app.matchs[2]
+    m1.code, m1.score_dom, m1.score_ext = 13, 78, 84                   # Bourg gagne en Élite : 2 points
+    app.finaliser(m1)
+    m2.code, m2.score_dom, m2.score_ext = 13, 70, 75                   # personne n'avait pronostiqué
+    app.finaliser(m2)
+    assert app.pronos.historique[0]["points"] == {"francis": 0, "ilona": 0}
+
+    cmd(match_id=1, joueur="ilona", choix="Inconnu")                  # libellé invalide : ignoré
+    cmd(match_id=1, joueur="renaud", choix="Bourg-en-Bresse")          # joueur inconnu : ignoré
+    cmd(match_id=1, joueur="ilona", choix="Bourg-en-Bresse")
+    e = app.pronos.historique[0]
+    assert e["pronos"]["ilona"] == "Bourg-en-Bresse"
+    assert e["resultats"] == {"francis": False, "ilona": True}
+    assert e["points"] == {"francis": 0, "ilona": 3}
+
+    cmd(match_id=2, joueur="ilona", choix="Bourg-en-Bresse")          # entrée créée à partir du résultat
+    assert [x["id"] for x in app.pronos.historique] == [1, 2]
+    assert app.pronos.historique[1]["points"]["ilona"] == 1
+    app.publier()
+    classement = json.loads(bus.retenus["basket_live/classement/attributs"])
+    assert classement["joueurs"][0] == {"nom": "Ilona", "points": 4, "bons": 2, "pronos": 2}
+
+    cmd(match_id=1, joueur="ilona", choix=AUCUN)                       # retour arrière possible
+    assert app.pronos.historique[0]["points"]["ilona"] == 0
+    assert app.pronos.historique[0]["pronos"]["ilona"] is None
+
+    app2 = App(config(tmp_path), FausseApi(), bus=FauxBus(), horloge=h)
+    app2.charger_etat()
+    assert app2.pronos.historique[1]["pronos"]["ilona"] == "Bourg-en-Bresse"
+
+
 def test_saison():
     assert saison(datetime(2026, 11, 5, tzinfo=TZ).timestamp(), TZ) == "2026-2027"
     assert saison(datetime(2027, 6, 10, tzinfo=TZ).timestamp(), TZ) == "2026-2027"

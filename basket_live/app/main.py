@@ -124,6 +124,14 @@ class App:
             elif texte.strip() == "tester_archive_nanterre":
                 self.archives.demande_test = True
                 log.info("Test archive Nanterre demandé par MQTT")
+            elif texte.strip().startswith("{"):
+                try:
+                    d = json.loads(texte)
+                except ValueError:
+                    log.warning("Commande JSON illisible : %s", texte)
+                    return
+                if isinstance(d, dict) and d.get("action") == "corriger_prono":
+                    self.corriger_prono(d)
             return
         morceaux = topic.split("/")
         if len(morceaux) == 5 and morceaux[:2] == ["basket_live", "suivi"] and morceaux[4] == "set":
@@ -149,6 +157,19 @@ class App:
             else:
                 log.info("Pronostic refusé (%s, %s) : match inconnu ou déjà commencé", topic, texte)
                 self.sale = True                            # republie l'état réel du menu
+
+    def corriger_prono(self, d: dict) -> None:
+        """Correction a posteriori d'un pronostic, uniquement sur un match terminé."""
+        mid, joueur, libelle = entier(d.get("match_id")), str(d.get("joueur", "")), str(d.get("choix", ""))
+        m = next((r for r in self.resultats if r.id == mid), None)
+        e = self.pronos.corriger(mid, joueur, libelle, m, self.tz) if mid is not None else None
+        if e is None:
+            log.warning("Correction de pronostic refusée (%s) : match non terminé, joueur ou choix invalide", d)
+            return
+        log.info("Pronostic corrigé : %s sur %s - %s : %s, points %s",
+                 joueur, e["domicile"], e["exterieur"], e["pronos"].get(joueur), e["points"])
+        self.marquer()
+        self.sauver_etat()
 
     # --- persistance ---------------------------------------------------------------------
 
