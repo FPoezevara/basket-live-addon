@@ -1,5 +1,5 @@
-/* Basket Live · Historique de saison 1.4.0 (badges du concours). Données MQTT locales uniquement : aucun appel API. */
-const HIST_VERSION = '1.4.0';
+/* Basket Live · Historique de saison 1.4.1 (badges du concours). Données MQTT locales uniquement : aucun appel API. */
+const HIST_VERSION = '1.4.1';
 const histEscape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const histNumber = value => value === null || value === undefined || value === '' ? '—'
   : typeof value === 'number' ? new Intl.NumberFormat('fr-FR', {maximumFractionDigits: 2}).format(value) : String(value);
@@ -371,7 +371,7 @@ class BasketPronosticsCard extends HTMLElement {
     return `<div class="badges">${liste.map((b, i) => `<button class="badge${b.negatif ? ' negatif' : ''}" data-joueur="${histEscape(j.id)}" data-i="${i}"
       aria-label="${histEscape(b.nom)}, ${Number(b.niveau) || 0} étoile${b.niveau > 1 ? 's' : ''} sur 5" title="${histEscape(b.nom)}">
       <span class="pastille niveau-${Number(b.niveau) || 0}"><ha-icon icon="${histEscape(b.icone)}"></ha-icon></span>
-      <span class="etoiles">${badgeEtoiles(Number(b.niveau) || 0)}</span></button>`).join('')}</div>`;
+      <span class="etoiles">${badgeEtoilesPastille(Number(b.niveau) || 0)}</span></button>`).join('')}</div>`;
   }
 
   getGridOptions() { return {columns: 'full', min_columns: 6}; }
@@ -478,18 +478,27 @@ class BasketPronosticsCard extends HTMLElement {
 const BADGE_ETOILE = 'M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z';
 const badgeEtoiles = (n, pleines = n, seule = false) => Array.from({length: seule ? 1 : 5}, (_, k) =>
   `<svg viewBox="0 0 24 24" class="${k < pleines ? 'pleine' : 'vide'}" aria-hidden="true"><path d="${BADGE_ETOILE}"/></svg>`).join('');
+// Sous une pastille : deux étoiles puis trois, centrées, donc en quinconce ; remplies dans l'ordre 1-2 puis 3-4-5.
+const badgeEtoilesPastille = n => {
+  const etoiles = Array.from({length: 5}, (_, k) =>
+    `<svg viewBox="0 0 24 24" class="${k < n ? 'pleine' : 'vide'}" aria-hidden="true"><path d="${BADGE_ETOILE}"/></svg>`);
+  return `<span class="ligne">${etoiles.slice(0, 2).join('')}</span><span class="ligne">${etoiles.slice(2).join('')}</span>`;
+};
 const BADGES_STYLE = `
   :host { --or:#f5b800; --rouge:#e5484d; }
   .badges { display:flex; flex-wrap:wrap; gap:10px 8px; margin-top:12px; }
   .badge { display:flex; flex-direction:column; align-items:center; gap:4px; padding:0; border:0; background:none; color:inherit; cursor:pointer; font:inherit; }
   .badge:focus-visible { outline:2px solid var(--orange); outline-offset:3px; border-radius:8px; }
-  .pastille { display:grid; place-items:center; width:34px; height:34px; border-radius:50%; background:var(--secondary-background-color,#8881);
-    border:2px solid #f5b80055; --mdc-icon-size:18px; color:var(--primary-text-color,#eef1f4); }
+  .pastille { display:grid; place-items:center; width:40px; height:40px; border-radius:50%; background:var(--secondary-background-color,#8881);
+    border:2px solid #f5b80055; --mdc-icon-size:22px; color:var(--primary-text-color,#eef1f4); }
   .negatif .pastille { border-color:#e5484d55; }
   .pastille.niveau-5 { border-color:var(--or); box-shadow:0 0 10px #f5b80066; }
   .negatif .pastille.niveau-5 { border-color:var(--rouge); box-shadow:0 0 10px #e5484d66; }
   .etoiles { display:flex; }
-  .etoiles svg { width:7px; height:7px; }
+  .badge .etoiles { flex-direction:column; align-items:center; }
+  .badge .etoiles .ligne { display:flex; gap:1px; }
+  .badge .etoiles .ligne + .ligne { margin-top:-1px; }
+  .etoiles svg { width:11px; height:11px; }
   .etoiles svg.pleine, .paliers .acquis svg { fill:var(--or); stroke:none; }
   .negatif .etoiles svg.pleine, .negatif .paliers .acquis svg { fill:var(--rouge); }
   .etoiles svg.vide, .paliers li:not(.acquis) svg { fill:none; stroke:var(--secondary-text-color,#7d8790); stroke-width:1.6; }
