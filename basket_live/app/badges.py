@@ -156,7 +156,7 @@ class Badges:
         return v
 
     def calculer(self, historique: list[dict], saison: str) -> dict[str, list[dict]]:
-        """Badges obtenus (au moins une étoile) par joueur, dans l'ordre du catalogue."""
+        """Badges obtenus (au moins une étoile) par joueur : ordre du catalogue, badges négatifs à la fin."""
         sortie = {}
         for j in self.joueurs:
             valeurs = self.valeurs(historique, saison, j)
@@ -171,7 +171,7 @@ class Badges:
                         "icone": b.icone, "niveau": n, "valeur": valeurs[b.id], "paliers": list(b.paliers),
                         "negatif": b.negatif, "description": b.phrase(valeurs[b.id], autre),
                     })
-            sortie[j] = obtenus
+            sortie[j] = sorted(obtenus, key=lambda b: b["negatif"])     # tri stable : ordre du catalogue conservé
         return sortie
 
     def nouvelles_etoiles(self, obtenus: dict[str, list[dict]], saison: str) -> dict[str, list[dict]]:

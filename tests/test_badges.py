@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from app.badges import CATALOGUE, Badges
+from app.badges import CATALOGUE, PAR_ID, Badges
 from app.main import App
 from app.notifications import Notifications
 from app.pronos import libelles_noms
@@ -92,7 +92,10 @@ def test_noms_genres_icones_et_ordre():
     for cle in set(f) & set(i):                                      # même badge, même icône
         assert f[cle]["icone"] == i[cle]["icone"]
     ordre = [b.id for b in CATALOGUE]
-    assert [x["id"] for x in obtenus["francis"]] == sorted(f, key=ordre.index)
+    for liste in obtenus.values():                                   # catalogue, négatifs regroupés à la fin
+        ids = [x["id"] for x in liste]
+        assert ids == sorted(ids, key=lambda i: (PAR_ID[i].negatif, ordre.index(i)))
+    assert [x["negatif"] for x in obtenus["ilona"]][-3:] == [True, True, True]
     assert all(x["niveau"] >= 1 for x in obtenus["francis"] + obtenus["ilona"])
     assert "lucky_streak" not in f                                   # 3 < 5 : pas encore d'étoile
     noms = {b.id: (b.masculin, b.feminin) for b in CATALOGUE}

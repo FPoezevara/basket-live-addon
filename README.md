@@ -114,7 +114,7 @@ Saison du 1er juillet au 30 juin. Les pronostics de l'autre ne sont cachés que 
 
 ### Badges (0.8.0)
 
-Quatorze badges récompensent les pronostics de la saison, avec cinq paliers chacun. Ils sont calculés par l'add-on à partir de l'historique figé des pronostics, y compris les matchs joués avant l'installation, et publiés dans `sensor.basket_live_classement` (`joueurs[].badges` : `id`, `nom`, `icone`, `niveau`, `valeur`, `paliers`, `negatif`, `description`, seulement à partir d'une étoile). Une même icône désigne un même badge pour tous les joueurs ; le nom est accordé au féminin pour les prénoms listés dans l'option `joueuses`.
+Quatorze badges récompensent les pronostics de la saison, avec cinq paliers chacun. Ils sont calculés par l'add-on à partir de l'historique figé des pronostics, y compris les matchs joués avant l'installation, et publiés dans `sensor.basket_live_classement` (`joueurs[].badges` : `id`, `nom`, `icone`, `niveau`, `valeur`, `paliers`, `negatif`, `description`, seulement à partir d'une étoile). Ordre du catalogue, badges négatifs regroupés à la fin. Une même icône désigne un même badge pour tous les joueurs ; le nom est accordé au féminin pour les prénoms listés dans l'option `joueuses`.
 
 | Badge | Critère | Paliers |
 |---|---|---|

@@ -1,5 +1,9 @@
 # Journal des versions
 
+## 0.8.1
+
+- Badges négatifs (Judas, Malchanceux/Malchanceuse, Chat noir) regroupés à la fin de la liste de chaque joueur. Aucune autre modification ; package et carte inchangés.
+
 ## 0.8.0
 
 - Badges du concours de pronostics, calculés sur la saison à partir de l'historique, y compris les matchs déjà joués : Lucky Streak, Ultra Nanterrien(ne), Judas, Européen(ne), Chanceux/Chanceuse, Malchanceux/Malchanceuse, Assidu(e), Sans-faute, Duelliste, Âmes sœurs, Globe-trotter, Rouleau compresseur, Visionnaire, Chat noir. Cinq paliers chacun, une icône par badge.
