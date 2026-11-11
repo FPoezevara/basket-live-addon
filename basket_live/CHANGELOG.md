@@ -1,5 +1,13 @@
 # Journal des versions
 
+## 0.8.0
+
+- Badges du concours de pronostics, calculés sur la saison à partir de l'historique, y compris les matchs déjà joués : Lucky Streak, Ultra Nanterrien(ne), Judas, Européen(ne), Chanceux/Chanceuse, Malchanceux/Malchanceuse, Assidu(e), Sans-faute, Duelliste, Âmes sœurs, Globe-trotter, Rouleau compresseur, Visionnaire, Chat noir. Cinq paliers chacun, une icône par badge.
+- Badges publiés avec le classement (`sensor.basket_live_classement`, attribut `joueurs[].badges`), affichés sous le bilan de chaque joueur dans l'onglet Pronostics, avec une fiche détaillée au toucher. Étoiles rouges pour les badges négatifs.
+- Notification à la personne qui gagne une nouvelle étoile, par une échéance persistante acquittée par Home Assistant ; plusieurs étoiles gagnées ensemble sont annoncées une seule fois. Le premier calcul après installation n'annonce rien.
+- Visionnaire compte à partir de l'installation : le classement Élite des deux équipes est désormais figé à la fin de chaque match.
+- Nouvelle option `joueuses` (accord au féminin). Carte Historique 1.4.0 et package Home Assistant à mettre à jour.
+
 ## 0.7.2
 
 - Commande MQTT `corriger_prono` pour corriger a posteriori le pronostic d'un joueur sur un match terminé : points, résultats et classement recalculés, correction journalisée et sauvegardée. Aucun appel SportsAPI.

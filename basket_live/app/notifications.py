@@ -72,6 +72,23 @@ class Notifications:
         self.echeances.update(groupes)
         return self.vers_dict() != avant
 
+    def ajouter_badges(self, joueur: str, badges: list[dict], maintenant: float) -> None:
+        """Annonce de nouvelles étoiles. Tant que l'annonce précédente de la personne n'est pas
+        acquittée, les nouvelles étoiles y sont fusionnées : une seule notification."""
+        if joueur not in self.joueurs or not badges:
+            return
+        resume = [{k: b[k] for k in ("id", "nom", "icone", "niveau", "negatif", "description")} for b in badges]
+        attente = next((e for e in self.echeances.values()
+                        if e["type"] == "badge" and e["personne"] == joueur), None)
+        if attente is None:
+            cle = f"badge:{joueur}:{int(maintenant * 1000)}"
+            self.echeances[cle] = {"cle": cle, "type": "badge", "personne": joueur,
+                                   "echeance": maintenant, "badges": resume}
+            return
+        par_id = {b["id"]: b for b in attente["badges"]}
+        par_id.update({b["id"]: b for b in resume})
+        attente["badges"] = list(par_id.values())
+
     def acquitter(self, cle: str, maintenant: float) -> bool:
         if not isinstance(cle, str):
             return False
@@ -110,6 +127,9 @@ class Notifications:
                     if not timestamp(debut) or cle != f"rappel_prono:{j}:{int(debut)}":
                         continue
                     if not isinstance(e.get("matchs"), list):
+                        continue
+                elif e.get("type") == "badge":
+                    if not cle.startswith(f"badge:{j}:") or not isinstance(e.get("badges"), list):
                         continue
                 else:
                     continue

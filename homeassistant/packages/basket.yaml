@@ -137,6 +137,60 @@ script:
                     notification_icon: mdi:crystal-ball
                     clickAction: /dashboard-basket/direct
 
+  # Nouvelles étoiles de badges, groupées par l'add-on : une notification par annonce.
+  basket_badge_annoncer:
+    alias: Basket - annoncer de nouvelles étoiles
+    mode: queued
+    max: 20
+    fields:
+      echeance:
+        description: Annonce publiée par l'add-on (personne, badges)
+    sequence:
+      - condition: template
+        value_template: >-
+          {{ echeance.personne in ['francis', 'ilona']
+             and echeance.badges is list and echeance.badges | count > 0 }}
+      - variables:
+          personne: "{{ echeance.personne }}"
+          titre: >-
+            {{ 'Nouvelle étoile' if echeance.badges | count == 1 else 'Nouvelles étoiles' }}
+          # « Ultra Nanterrienne ★★★☆☆ : 10 victoires de Nanterre… », une ligne par badge
+          texte: >-
+            {% set ns = namespace(l=[]) %}
+            {% for b in echeance.badges %}
+              {% set n = b.niveau | int(0) %}
+              {% set ns.l = ns.l + [b.nom ~ ' ' ~ '★' * n ~ '☆' * (5 - n) ~ ' : ' ~ b.description] %}
+            {% endfor %}
+            {{ ns.l | join('\n') }}
+          etiquette: "basket_{{ echeance.cle | replace(':', '_') }}"
+      - choose:
+          - conditions: "{{ personne == 'francis' }}"
+            sequence:
+              - action: notify.mobile_app_iphone_de_francis_2
+                data:
+                  title: "{{ titre }}"
+                  message: "{{ texte }}"
+                  data:
+                    tag: "{{ etiquette }}"
+                    group: basket-badges
+                    notification_icon: mdi:star-circle
+                    url: /dashboard-basket/pronostics
+                    push:
+                      sound: default
+          - conditions: "{{ personne == 'ilona' }}"
+            sequence:
+              - action: notify.mobile_app_sm_g998u1
+                data:
+                  title: "{{ titre }}"
+                  message: "{{ texte }}"
+                  data:
+                    tag: "{{ etiquette }}"
+                    group: basket-badges
+                    channel: Basket badges
+                    importance: default
+                    notification_icon: mdi:star-circle
+                    clickAction: /dashboard-basket/pronostics
+
   basket_notification_executer:
     alias: Basket - traiter une échéance persistante
     mode: queued
@@ -164,6 +218,11 @@ script:
           - conditions: "{{ echeance.type == 'rappel_prono' }}"
             sequence:
               - action: script.basket_prono_rappeler
+                data:
+                  echeance: "{{ echeance }}"
+          - conditions: "{{ echeance.type == 'badge' }}"
+            sequence:
+              - action: script.basket_badge_annoncer
                 data:
                   echeance: "{{ echeance }}"
       # Une erreur de notification interrompt le script avant cet acquittement :
@@ -431,7 +490,7 @@ automation:
 
   - id: basket_notifications_echeances
     alias: Basket - échéances persistantes des notifications
-    description: Ferme les lives échus et traite les rappels de pronostics, y compris après un redémarrage
+    description: Ferme les lives échus, traite les rappels de pronostics et annonce les nouvelles étoiles, y compris après un redémarrage
     mode: single
     max_exceeded: silent
     triggers:

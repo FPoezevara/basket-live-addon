@@ -25,6 +25,7 @@ from .archives import Archives, liste, saison_compatible
 from .classements import normaliser_classement
 from .notifications import Notifications
 from .suivis import Suivis
+from .badges import Badges
 from .pronos import Pronos, ouvert, saison
 from .modele import (CODE_TERMINE, CODES_EN_COURS, Criteres, Match, actif, appliquer, categorie,
                      construire_match, date_locale, entier, finaliser, maj_statique, normaliser, vue)
@@ -77,7 +78,8 @@ class App:
         self.sale = True
         self.etat_modifie = False
         self.fichier_etat = cfg.dossier_donnees / "etat.json"
-        self.pronos = Pronos(cfg.joueurs, set(cfg.tournois_elite))
+        self.pronos = Pronos(cfg.joueurs, set(cfg.tournois_elite), cfg.equipe_nanterre)
+        self.badges = Badges(cfg.joueurs, cfg.joueuses, set(cfg.tournois_elite), set(cfg.tournois_europe))
         self.suivis = Suivis(cfg.joueurs)
         self.notifications = Notifications(cfg.joueurs)
         self.demarrage_ts = self.horloge()
@@ -188,6 +190,7 @@ class App:
         self.prochain_calendrier_lointain = max(self.prochain_calendrier_lointain,
                                                 etat.get("prochain_calendrier_lointain", 0))
         self.pronos.charger(etat.get("pronos", {}))
+        self.badges.charger(etat.get("badges", {}))
         self.suivis.charger(etat.get("suivis", {}))
         self.notifications.charger(etat.get("notifications", {}))
         for m in self.resultats:
@@ -207,6 +210,7 @@ class App:
             "classements": self.classements,
             "prochain_calendrier_lointain": self.prochain_calendrier_lointain,
             "pronos": self.pronos.vers_dict(),
+            "badges": self.badges.vers_dict(),
             "suivis": self.suivis.vers_dict(),
             "notifications": self.notifications.vers_dict(),
             "api": {"jour": self.api.jour, "compteur": self.api.compteur,
@@ -267,6 +271,9 @@ class App:
         finaliser(m, self.horloge())
         e = self.pronos.resultat(m, self.tz)
         if e:
+            rangs = self.rangs_elite(m)
+            if rangs:
+                e["rangs"] = rangs                  # classement au coup de sifflet final (badge Visionnaire)
             log.info("Pronostics de %s - %s : %s", m.domicile, m.exterieur, e["points"])
         self.resultats = [r for r in self.resultats if r.id != m.id]
         self.resultats.append(m)
@@ -275,6 +282,15 @@ class App:
         self.emettre("fin", m)
         self.suivis.retirer(m.id)
         self.marquer()
+
+    def rangs_elite(self, m: Match) -> dict | None:
+        """Rangs des deux équipes dans le dernier classement Élite en cache, si le match est d'Élite."""
+        if m.tournoi_id not in self.cfg.tournois_elite:
+            return None
+        equipes = (self.classements.get("tableaux", {}).get("elite") or {}).get("equipes") or []
+        rangs = {e["id"]: e["rang"] for e in equipes if isinstance(e, dict) and e.get("id")}
+        dom, ext = rangs.get(m.domicile_id), rangs.get(m.exterieur_id)
+        return {"dom": dom, "ext": ext} if dom and ext else None
 
     def actualiser_notifications(self) -> None:
         if self.notifications.actualiser(list(self.matchs.values()), self.resultats, self.pronos, self.horloge()):
@@ -358,6 +374,18 @@ class App:
         self.bus.poser(topic_etat("pronostics"), str(len(passes)))
         self.bus.poser(topic_attributs("pronostics"), json.dumps({"saison": courante, "matchs": liste}, ensure_ascii=False))
         classement = self.pronos.classement(courante)
+        obtenus = self.badges.calculer(self.pronos.historique, courante)
+        premier_calcul = courante not in self.badges.notifiees
+        for ligne in classement:
+            ligne["badges"] = obtenus.get(ligne["id"], [])
+        nouveaux = self.badges.nouvelles_etoiles(obtenus, courante)
+        for j, liste in nouveaux.items():
+            log.info("Nouvelles étoiles pour %s : %s", j, ", ".join(f"{b['nom']} {b['niveau']}" for b in liste))
+            self.notifications.ajouter_badges(j, liste, maintenant)
+        if nouveaux or premier_calcul:
+            self.etat_modifie = True                # niveaux de référence à conserver
+        if nouveaux:
+            self.sauver_etat()                      # annonce durable avant sa publication MQTT
         tete = classement[0] if classement else None
         egalite = len(classement) > 1 and classement[0]["points"] == classement[1]["points"]
         self.bus.poser(topic_etat("classement"), "Égalité" if egalite or not tete else tete["nom"])

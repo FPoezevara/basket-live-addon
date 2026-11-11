@@ -28,6 +28,7 @@ def normaliser_classement(reponse, equipe_id: int, *, bcl: bool) -> dict | None:
             victoires = entier(ligne.get("wins"))
             equipes.append({
                 "rang": rang,
+                "id": entier(equipe.get("id")),
                 "equipe": equipe.get("shortName") or equipe["name"],
                 "nanterre": entier(equipe.get("id")) == equipe_id,
                 "joues": joues,

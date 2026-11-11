@@ -58,9 +58,10 @@ def libelles(m: Match) -> dict[str, str]:
 
 
 class Pronos:
-    def __init__(self, joueurs: list[str], elite: set[int]):
+    def __init__(self, joueurs: list[str], elite: set[int], nanterre: int | None = None):
         self.joueurs = joueurs
         self.elite = elite
+        self.nanterre = nanterre
         self.choix: dict[int, dict[str, str]] = {}     # id du match -> joueur -> "dom" | "ext"
         self.historique: list[dict] = []               # matchs terminés ayant au moins un pronostic
         self.publies: set[str] = set()                 # menus publiés en découverte (« joueur_id »)
@@ -112,6 +113,8 @@ class Pronos:
             "categorie": m.categorie,
             "domicile": m.domicile,
             "exterieur": m.exterieur,
+            "nanterre": ("dom" if self.nanterre is not None and m.domicile_id == self.nanterre
+                         else "ext" if self.nanterre is not None and m.exterieur_id == self.nanterre else None),
             "score": f"{m.score_dom} - {m.score_ext}" if m.score_dom is not None and m.score_ext is not None else None,
             "termine": m.termine,
             "points_en_jeu": en_jeu,
@@ -168,7 +171,7 @@ class Pronos:
                 for h in self.historique if h.get('termine')}
 
     def classement(self, saison_courante: str) -> list[dict]:
-        lignes = {j: {"nom": j.capitalize(), "points": 0, "bons": 0, "pronos": 0} for j in self.joueurs}
+        lignes = {j: {"id": j, "nom": j.capitalize(), "points": 0, "bons": 0, "pronos": 0} for j in self.joueurs}
         for h in self.historique:
             if h["saison"] != saison_courante:
                 continue

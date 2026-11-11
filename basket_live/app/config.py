@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -30,6 +30,7 @@ class Config:
     api_base: str
     ws_url: str
     api_v1_base: str = "https://api.sportsapipro.com/v1"
+    joueuses: list[str] = field(default_factory=lambda: ["ilona"])
 
 
 def charger() -> Config:
@@ -47,6 +48,7 @@ def charger() -> Config:
         quota_jour=int(options.get("quota_jour", 100)),
         log_level=str(options.get("log_level", "info")).upper(),
         joueurs=[str(j).strip().lower() for j in options.get("joueurs", ["francis", "ilona"])],
+        joueuses=[str(j).strip().lower() for j in options.get("joueuses", ["ilona"])],
         mqtt_host=os.environ.get("MQTT_HOST", "core-mosquitto"),
         mqtt_port=int(os.environ.get("MQTT_PORT") or 1883),
         mqtt_user=os.environ.get("MQTT_USER") or None,

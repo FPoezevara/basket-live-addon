@@ -145,3 +145,56 @@ test('traductions des statistiques et note fournisseur séparée de l’évaluat
   assert.match(card.shadowRoot.innerHTML,/Note fournisseur/);
   assert.doesNotMatch(card.shadowRoot.innerHTML,/<td>7,7<\/td>/);
 });
+
+function fixturePronos() {
+  const classes=new Map(), listeners={};
+  class Element { attachShadow(){this.shadowRoot={innerHTML:'',querySelector:()=>null,addEventListener:(nom,fn)=>{listeners[nom]=fn;}};} }
+  const contexte=vm.createContext({HTMLElement:Element,customElements:{define:(n,c)=>classes.set(n,c)},window:{},console:{info(){}}});
+  vm.runInContext(code,contexte);
+  const card=new (classes.get('basket-pronostics-card'))();
+  card.setConfig({});
+  const badge=(id,nom,niveau,negatif=false)=>({id,nom,icone:id==='judas'?'mdi:drama-masks':'mdi:bullhorn',niveau,valeur:6,
+    paliers:[1,5,10,20,30],negatif,description:`<b>${nom}</b> 6 victoires`});
+  const hass={states:{
+    'sensor.basket_live_classement':{state:'Francis',attributes:{saison:'2026-2027',joueurs:[
+      {id:'francis',nom:'Francis',points:30,bons:14,pronos:16,badges:[badge('ultra','Ultra Nanterrien',2)]},
+      {id:'ilona',nom:'Ilona',points:22,bons:11,pronos:16,badges:[badge('ultra','Ultra Nanterrienne',2),badge('judas','Judas',1,true)]}]}},
+    'sensor.basket_live_pronostics':{state:'0',attributes:{saison:'2026-2027',matchs:[]}}}};
+  card.hass=hass;
+  return {card,hass,listeners};
+}
+
+test('badges sous chaque bilan, même icône pour le même badge, étoiles et badge négatif',()=>{
+  const {card}=fixturePronos();
+  const html=card.shadowRoot.innerHTML;
+  assert.equal((html.match(/class="badge( negatif)?"/g)||[]).length,3);
+  assert.equal((html.match(/icon="mdi:bullhorn"/g)||[]).length,2);
+  assert.match(html,/class="badge negatif" data-joueur="ilona" data-i="1"/);
+  assert.match(html,/Ultra Nanterrienne, 2 étoiles sur 5/);
+  assert.equal((html.match(/class="pleine"/g)||[]).length,2+2+1);
+  assert.doesNotMatch(html,/<dialog/);
+});
+
+test('appui sur un badge : fiche avec description échappée, progression et paliers',()=>{
+  const {card,listeners}=fixturePronos();
+  const bouton={dataset:{joueur:'ilona',i:'0'}};
+  listeners.click({target:{closest:sel=>sel==='button.badge'?bouton:null}});
+  const html=card.shadowRoot.innerHTML;
+  assert.match(html,/<dialog class="fiche-badge"/);
+  assert.match(html,/Ilona<\/div><h3>Ultra Nanterrienne<\/h3>/);
+  assert.match(html,/&lt;b&gt;Ultra Nanterrienne&lt;\/b&gt; 6 victoires/);
+  assert.match(html,/Prochaine étoile à 10/);
+  assert.match(html,/width:20%/);                       // de 5 à 10, 6 atteint
+  assert.equal((html.match(/<li class="acquis">/g)||[]).length,2);
+});
+
+test('égalité : une rangée de badges par personne dans la tuile commune',()=>{
+  const {card,hass}=fixturePronos();
+  const j=hass.states['sensor.basket_live_classement'].attributes.joueurs;
+  Object.assign(j[1],{points:30,bons:14});
+  hass.states['sensor.basket_live_classement']={...hass.states['sensor.basket_live_classement']};
+  card.hass=hass;
+  const html=card.shadowRoot.innerHTML;
+  assert.match(html,/Égalité de l'amour/);
+  assert.equal((html.match(/class="badges-egalite"/g)||[]).length,2);
+});

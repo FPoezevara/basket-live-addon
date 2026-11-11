@@ -112,6 +112,29 @@ Pour chaque match à venir et chaque joueur (option `joueurs`), l'add-on publie 
 
 Saison du 1er juillet au 30 juin. Les pronostics de l'autre ne sont cachés que sur le tableau de bord : HA n'a pas de droits par entité.
 
+### Badges (0.8.0)
+
+Quatorze badges récompensent les pronostics de la saison, avec cinq paliers chacun. Ils sont calculés par l'add-on à partir de l'historique figé des pronostics, y compris les matchs joués avant l'installation, et publiés dans `sensor.basket_live_classement` (`joueurs[].badges` : `id`, `nom`, `icone`, `niveau`, `valeur`, `paliers`, `negatif`, `description`, seulement à partir d'une étoile). Une même icône désigne un même badge pour tous les joueurs ; le nom est accordé au féminin pour les prénoms listés dans l'option `joueuses`.
+
+| Badge | Critère | Paliers |
+|---|---|---|
+| Lucky Streak | Meilleure série de pronostics réussis d'affilée | 5, 10, 25, 50, 100 |
+| Ultra Nanterrien(ne) | Victoires de Nanterre correctement pronostiquées | 1, 5, 10, 20, 30 |
+| Judas (négatif) | Pronostics contre Nanterre | 1, 5, 10, 20, 30 |
+| Européen(ne) | Pronostics réussis en coupe d'Europe | 5, 10, 25, 50, 100 |
+| Chanceux / Chanceuse | Réussis sur un match gagné d'un point | 1, 2, 5, 10, 20 |
+| Malchanceux / Malchanceuse (négatif) | Perdus sur un match gagné d'un point | 1, 2, 5, 10, 20 |
+| Assidu(e) | Pronostics joués | 10, 50, 100, 200, 300 |
+| Sans-faute | Journées d'au moins 3 pronostics, tous réussis | 1, 5, 10, 20, 30 |
+| Duelliste | Pronostic opposé à l'autre joueur, et réussi | 1, 5, 10, 20, 30 |
+| Âmes sœurs | Même pronostic, réussi par les deux | 5, 15, 30, 50, 80 |
+| Globe-trotter | Victoires à l'extérieur correctement pronostiquées | 5, 10, 25, 50, 100 |
+| Rouleau compresseur | Réussis sur une victoire d'au moins 20 points | 1, 2, 5, 10, 20 |
+| Visionnaire | Élite : victoire d'une équipe classée au moins 4 places plus bas, correctement pronostiquée (à partir de 0.8.0) | 1, 2, 5, 10, 20 |
+| Chat noir (négatif) | Pire série de pronostics perdus d'affilée | 1, 2, 5, 10, 20 |
+
+Un match nul ou sans vainqueur ne compte que pour Assidu et Judas. Une nouvelle étoile crée une échéance `badge` dans `sensor.basket_live_notifications`, traitée par le package comme les rappels : notification à la personne concernée, acquittement sur `basket_live/notification/ack`. Les étoiles gagnées avant l'acquittement sont fusionnées dans la même annonce. Le premier calcul d'une saison, notamment à l'installation, est enregistré sans annonce ; une étoile perdue par correction puis regagnée n'est pas réannoncée.
+
 ### Corriger un pronostic après coup (0.7.2)
 
 Un pronostic perdu ou erroné sur un match **terminé** se corrige par une commande JSON sur `basket_live/commande`. `choix` reprend le libellé du menu (nom court de l'équipe) ou `—` pour retirer le pronostic. Les points, le résultat et le classement sont recalculés avec le barème du match ; si personne n'avait pronostiqué, l'entrée est créée. Un match non terminé, un joueur ou un libellé inconnu sont refusés et journalisés.

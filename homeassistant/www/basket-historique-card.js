@@ -1,5 +1,5 @@
-/* Basket Live · Historique de saison 1.3.0. Données MQTT locales uniquement : aucun appel API. */
-const HIST_VERSION = '1.3.0';
+/* Basket Live · Historique de saison 1.4.0 (badges du concours). Données MQTT locales uniquement : aucun appel API. */
+const HIST_VERSION = '1.4.0';
 const histEscape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const histNumber = value => value === null || value === undefined || value === '' ? '—'
   : typeof value === 'number' ? new Intl.NumberFormat('fr-FR', {maximumFractionDigits: 2}).format(value) : String(value);
@@ -313,7 +313,65 @@ class BasketPronosticsCard extends HTMLElement {
     const contenu = this._recents
       ? this._resultatsRecents(premiere.matchs || [])
       : this._concours(premiere, seconde, baremeOuvert);
-    this.shadowRoot.innerHTML = `<style>${HIST_STYLE}${PRONOS_STYLE}</style><ha-card>${contenu}</ha-card>`;
+    this._contenu = contenu;
+    this._classement = premiere;
+    this._rendre();
+  }
+
+  _rendre() {
+    this.shadowRoot.innerHTML = `<style>${HIST_STYLE}${PRONOS_STYLE}${BADGES_STYLE}</style><ha-card>${this._contenu}${this._fiche()}</ha-card>`;
+    if (!this._ecoute) {
+      this._ecoute = true;
+      this.shadowRoot.addEventListener('click', e => {
+        const badge = e.target.closest?.('button.badge');
+        if (badge) {
+          this._ouvert = {joueur: badge.dataset.joueur, i: Number(badge.dataset.i)};
+          this._rendre();
+          return;
+        }
+        // Croix, ou appui sur le fond (la cible est alors la boîte de dialogue elle-même)
+        const dialogue = e.target.closest?.('dialog.fiche-badge');
+        if (dialogue && (e.target === dialogue || e.target.closest('.fermer'))) dialogue.close();
+      });
+    }
+    const dialogue = this.shadowRoot.querySelector?.('dialog.fiche-badge');
+    if (dialogue) {
+      // Échap ou fermeture : la boîte se ferme d'elle-même, il suffit d'oublier la fiche ouverte.
+      dialogue.addEventListener('close', () => { this._ouvert = null; });
+      if (!dialogue.open) dialogue.showModal();
+    }
+  }
+
+  _fiche() {
+    if (!this._ouvert || this._recents) return '';
+    const j = (this._classement?.joueurs || []).find(x => x.id === this._ouvert.joueur);
+    const b = j?.badges?.[this._ouvert.i];
+    if (!b) return '';
+    const paliers = Array.isArray(b.paliers) ? b.paliers : [];
+    const atteint = Number(b.niveau) || 0, suivant = paliers[atteint];
+    const precedent = atteint ? paliers[atteint - 1] : 0;
+    const part = suivant ? Math.max(0, Math.min(100, Math.round(100 * (b.valeur - precedent) / (suivant - precedent)))) : 100;
+    // <dialog> modal : affiché au-dessus de tout le tableau de bord, quel que soit le conteneur de la carte.
+    return `<dialog class="fiche-badge${b.negatif ? ' negatif' : ''}" aria-label="${histEscape(b.nom)}"><div class="fiche" tabindex="-1" autofocus>
+      <button class="fermer" aria-label="Fermer"><ha-icon icon="mdi:close"></ha-icon></button>
+      <div class="fiche-tete"><span class="pastille grande niveau-${atteint}"><ha-icon icon="${histEscape(b.icone)}"></ha-icon></span>
+        <div><div class="fiche-joueur">${histEscape(j.nom)}</div><h3>${histEscape(b.nom)}</h3>
+          <span class="etoiles grandes" aria-label="${atteint} étoile${atteint > 1 ? 's' : ''} sur 5">${badgeEtoiles(atteint)}</span></div></div>
+      <p class="fiche-texte">${histEscape(b.description)}</p>
+      <div class="progression"><div class="progression-libelle"><span>${suivant ? `Prochaine étoile à ${histEscape(histNumber(suivant))}` : 'Toutes les étoiles obtenues'}</span>
+        <b>${histEscape(histNumber(b.valeur))}${suivant ? ' / ' + histEscape(histNumber(suivant)) : ''}</b></div>
+        <div class="jauge"><i style="width:${part}%"></i></div></div>
+      <ol class="paliers">${paliers.map((v, k) => `<li class="${k < atteint ? 'acquis' : ''}">${badgeEtoiles(1, k < atteint ? 1 : 0, true)}<span>${histEscape(histNumber(v))}</span></li>`).join('')}</ol>
+    </div></dialog>`;
+  }
+
+  _badges(j) {
+    const liste = Array.isArray(j.badges) ? j.badges : [];
+    if (!liste.length) return '';
+    return `<div class="badges">${liste.map((b, i) => `<button class="badge${b.negatif ? ' negatif' : ''}" data-joueur="${histEscape(j.id)}" data-i="${i}"
+      aria-label="${histEscape(b.nom)}, ${Number(b.niveau) || 0} étoile${b.niveau > 1 ? 's' : ''} sur 5" title="${histEscape(b.nom)}">
+      <span class="pastille niveau-${Number(b.niveau) || 0}"><ha-icon icon="${histEscape(b.icone)}"></ha-icon></span>
+      <span class="etoiles">${badgeEtoiles(Number(b.niveau) || 0)}</span></button>`).join('')}</div>`;
   }
 
   getGridOptions() { return {columns: 'full', min_columns: 6}; }
@@ -365,18 +423,20 @@ class BasketPronosticsCard extends HTMLElement {
     const egalite = joueurs.length === 2 &&
       premier.points === second.points && premier.bons === second.bons;
     const reussites = j => `${histEscape(histNumber(j.bons))} sur ${histEscape(histNumber(j.pronos))} réussis`;
-    const tuile = (titre, points, bilan) => `<article class="rang">
+    const tuile = (titre, points, bilan, badges = '') => `<article class="rang">
       <span class="rang-nom">${titre}</span>
       <div class="rang-score">${histEscape(histNumber(points))} <span>pts</span></div>
-      <span class="competition">${bilan}</span>
+      <span class="competition">${bilan}</span>${badges}
     </article>`;
     const podium = egalite
       ? tuile("Égalité de l'amour - Ilona et Francis", premier.points,
           premier.pronos === second.pronos
             ? reussites(premier)
-            : joueurs.map(j => `${histEscape(j.nom)} · ${reussites(j)}`).join('<br>'))
+            : joueurs.map(j => `${histEscape(j.nom)} · ${reussites(j)}`).join('<br>'),
+          joueurs.filter(j => (j.badges || []).length)
+            .map(j => `<div class="badges-egalite"><span class="competition">${histEscape(j.nom)}</span>${this._badges(j)}</div>`).join(''))
       : joueurs.map((j, i) => tuile(
-          `<span class="rang-numero">${i + 1}</span>${histEscape(j.nom)}`, j.points, reussites(j)
+          `<span class="rang-numero">${i + 1}</span>${histEscape(j.nom)}`, j.points, reussites(j), this._badges(j)
         )).join('');
     const lignes = matchs.map(m => {
       const date = new Date(m.debut).toLocaleDateString('fr-FR', {
@@ -414,6 +474,47 @@ class BasketPronosticsCard extends HTMLElement {
   }
 }
 
+// Étoiles des badges : pleines jusqu'au niveau atteint ; or, ou rouge pour un badge négatif (classe CSS).
+const BADGE_ETOILE = 'M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z';
+const badgeEtoiles = (n, pleines = n, seule = false) => Array.from({length: seule ? 1 : 5}, (_, k) =>
+  `<svg viewBox="0 0 24 24" class="${k < pleines ? 'pleine' : 'vide'}" aria-hidden="true"><path d="${BADGE_ETOILE}"/></svg>`).join('');
+const BADGES_STYLE = `
+  :host { --or:#f5b800; --rouge:#e5484d; }
+  .badges { display:flex; flex-wrap:wrap; gap:10px 8px; margin-top:12px; }
+  .badge { display:flex; flex-direction:column; align-items:center; gap:4px; padding:0; border:0; background:none; color:inherit; cursor:pointer; font:inherit; }
+  .badge:focus-visible { outline:2px solid var(--orange); outline-offset:3px; border-radius:8px; }
+  .pastille { display:grid; place-items:center; width:34px; height:34px; border-radius:50%; background:var(--secondary-background-color,#8881);
+    border:2px solid #f5b80055; --mdc-icon-size:18px; color:var(--primary-text-color,#eef1f4); }
+  .negatif .pastille { border-color:#e5484d55; }
+  .pastille.niveau-5 { border-color:var(--or); box-shadow:0 0 10px #f5b80066; }
+  .negatif .pastille.niveau-5 { border-color:var(--rouge); box-shadow:0 0 10px #e5484d66; }
+  .etoiles { display:flex; }
+  .etoiles svg { width:7px; height:7px; }
+  .etoiles svg.pleine, .paliers .acquis svg { fill:var(--or); stroke:none; }
+  .negatif .etoiles svg.pleine, .negatif .paliers .acquis svg { fill:var(--rouge); }
+  .etoiles svg.vide, .paliers li:not(.acquis) svg { fill:none; stroke:var(--secondary-text-color,#7d8790); stroke-width:1.6; }
+  .badges-egalite { margin-top:10px; } .badges-egalite .badges { margin-top:6px; }
+  dialog.fiche-badge { width:min(calc(100vw - 32px),360px); padding:0; border:1px solid var(--divider-color,#333c43); border-radius:16px;
+    background:var(--card-background-color,#1c2228); color:var(--primary-text-color,#eef1f4); box-shadow:0 12px 40px #0008; }
+  dialog.fiche-badge::backdrop { background:#0009; }
+  .fiche { position:relative; padding:20px; outline:none; }
+  .fermer { position:absolute; top:10px; right:10px; border:0; background:none; color:var(--secondary-text-color,#aab5bf); cursor:pointer; --mdc-icon-size:20px; }
+  .fiche-tete { display:flex; gap:14px; align-items:center; }
+  .pastille.grande { width:64px; height:64px; --mdc-icon-size:34px; border-width:3px; }
+  .fiche-joueur { font-size:11px; color:var(--secondary-text-color,#aab5bf); }
+  .fiche h3 { margin:2px 0 6px; font-size:18px; }
+  .etoiles.grandes svg { width:16px; height:16px; }
+  .fiche-texte { margin:16px 0 12px; font-size:13px; line-height:1.5; }
+  .progression-libelle { display:flex; justify-content:space-between; font-size:11px; color:var(--secondary-text-color,#aab5bf); }
+  .jauge { height:6px; margin-top:6px; border-radius:4px; background:var(--secondary-background-color,#8882); overflow:hidden; }
+  .jauge i { display:block; height:100%; background:var(--or); border-radius:4px; }
+  .negatif .jauge i { background:var(--rouge); }
+  .paliers { display:flex; justify-content:space-between; gap:4px; margin:16px 0 0; padding:0; list-style:none; }
+  .paliers li { display:flex; flex-direction:column; align-items:center; gap:3px; flex:1; padding:6px 0; border-radius:8px; font-size:11px;
+    font-variant-numeric:tabular-nums; color:var(--secondary-text-color,#aab5bf); background:var(--secondary-background-color,#8881); }
+  .paliers li.acquis { color:var(--primary-text-color,#eef1f4); font-weight:700; }
+  .paliers svg { width:11px; height:11px; }
+`;
 const PRONOS_STYLE = `
   .competition { color: var(--secondary-text-color, #aab5bf); font-size: 11px; }
   .recents { padding-block: 10px; }

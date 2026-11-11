@@ -29,6 +29,10 @@ def faire(tmp_path, h):
     return app, bus
 
 
+def sans_badges(ligne):
+    return {k: v for k, v in ligne.items() if k != "badges"}
+
+
 def menus(bus):
     return {t: json.loads(p) for t, p in bus.retenus.items() if t.startswith("homeassistant/select/") and p}
 
@@ -89,8 +93,8 @@ def test_saisie_verrou_points_et_classement(tmp_path):
     assert histo["matchs"][1]["points"] == {"francis": 3, "ilona": 0}
     assert histo["matchs"][0]["pronos"]["ilona"] is None
     classement = json.loads(bus.retenus["basket_live/classement/attributs"])
-    assert classement["joueurs"][0] == {"nom": "Francis", "points": 3, "bons": 1, "pronos": 2}
-    assert classement["joueurs"][1] == {"nom": "Ilona", "points": 0, "bons": 0, "pronos": 1}
+    assert sans_badges(classement["joueurs"][0]) == {"id": "francis", "nom": "Francis", "points": 3, "bons": 1, "pronos": 2}
+    assert sans_badges(classement["joueurs"][1]) == {"id": "ilona", "nom": "Ilona", "points": 0, "bons": 0, "pronos": 1}
     assert bus.retenus["basket_live/classement/etat"] == "Francis"
     assert bus.retenus["basket_live/pronostics/etat"] == "2"
 
@@ -133,7 +137,7 @@ def test_correction_a_posteriori(tmp_path):
     assert app.pronos.historique[1]["points"]["ilona"] == 1
     app.publier()
     classement = json.loads(bus.retenus["basket_live/classement/attributs"])
-    assert classement["joueurs"][0] == {"nom": "Ilona", "points": 4, "bons": 2, "pronos": 2}
+    assert sans_badges(classement["joueurs"][0]) == {"id": "ilona", "nom": "Ilona", "points": 4, "bons": 2, "pronos": 2}
 
     cmd(match_id=1, joueur="ilona", choix=AUCUN)                       # retour arrière possible
     assert app.pronos.historique[0]["points"]["ilona"] == 0
