@@ -124,7 +124,7 @@ script:
                     url: /dashboard-basket/direct
           - conditions: "{{ personne == 'ilona' }}"
             sequence:
-              - action: notify.mobile_app_sm_g998u1
+              - action: notify.mobile_app_ilona
                 data:
                   title: "{{ titre }}"
                   message: "{{ texte }}"
@@ -179,7 +179,7 @@ script:
                       sound: default
           - conditions: "{{ personne == 'ilona' }}"
             sequence:
-              - action: notify.mobile_app_sm_g998u1
+              - action: notify.mobile_app_ilona
                 data:
                   title: "{{ titre }}"
                   message: "{{ texte }}"
@@ -295,7 +295,7 @@ script:
                     url: /dashboard-basket/direct
           - conditions: "{{ personne == 'ilona' }}"
             sequence:
-              - action: notify.mobile_app_sm_g998u1
+              - action: notify.mobile_app_ilona
                 data:
                   # Android a toute la largeur : le score tient dans le titre
                   title: "{{ dom ~ '  ' ~ score ~ '  ' ~ ext if a_score else dom ~ ' - ' ~ ext }}"
@@ -343,7 +343,7 @@ script:
                       interruption-level: passive
           - conditions: "{{ personne == 'ilona' }}"
             sequence:
-              - action: notify.mobile_app_sm_g998u1
+              - action: notify.mobile_app_ilona
                 data:
                   title: "{{ match.tournoi }}"
                   message: "{{ corps }}"
@@ -364,7 +364,7 @@ script:
       match_id:
         description: Identifiant du match
     sequence:
-      - action: "{{ 'notify.mobile_app_iphone_de_francis_2' if personne == 'francis' else 'notify.mobile_app_sm_g998u1' }}"
+      - action: "{{ 'notify.mobile_app_iphone_de_francis_2' if personne == 'francis' else 'notify.mobile_app_ilona' }}"
         data:
           message: clear_notification
           data:
