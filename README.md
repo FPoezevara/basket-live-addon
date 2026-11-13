@@ -114,7 +114,7 @@ Saison du 1er juillet au 30 juin. Les pronostics de l'autre ne sont cachés que 
 
 ### Badges (0.8.0)
 
-Quatorze badges récompensent les pronostics de la saison, avec cinq paliers chacun. Ils sont calculés par l'add-on à partir de l'historique figé des pronostics, y compris les matchs joués avant l'installation, et publiés dans `sensor.basket_live_classement` (`joueurs[].badges` : `id`, `nom`, `icone`, `niveau`, `valeur`, `paliers`, `negatif`, `description`, seulement à partir d'une étoile). Ordre du catalogue, badges négatifs regroupés à la fin. Une même icône désigne un même badge pour tous les joueurs ; le nom est accordé au féminin pour les prénoms listés dans l'option `joueuses`.
+Quatorze badges récompensent les pronostics de la saison, avec cinq paliers chacun. Ils sont calculés par l'add-on à partir de l'historique figé des pronostics, y compris les matchs joués avant l'installation, et publiés dans `sensor.basket_live_classement` (`joueurs[].badges` : `id`, `nom`, `icone`, `niveau`, `valeur`, `paliers`, `negatif`, `description` ; tous les badges, niveau 0 compris, affichés grisés tant qu'ils ne sont pas obtenus). Ordre du catalogue, badges négatifs regroupés à la fin. Une même icône désigne un même badge pour tous les joueurs ; le nom est accordé au féminin pour les prénoms listés dans l'option `joueuses`.
 
 | Badge | Critère | Paliers |
 |---|---|---|
@@ -126,7 +126,7 @@ Quatorze badges récompensent les pronostics de la saison, avec cinq paliers cha
 | Malchanceux / Malchanceuse (négatif) | Perdus sur un match gagné d'un point | 1, 2, 5, 10, 20 |
 | Assidu(e) | Pronostics joués | 10, 50, 100, 200, 300 |
 | Sans-faute | Journées d'au moins 3 pronostics, tous réussis | 1, 5, 10, 20, 30 |
-| Duelliste | Pronostic opposé à l'autre joueur, et réussi | 1, 5, 10, 20, 30 |
+| Heartbreaker | Pronostic opposé à l'autre joueur, et réussi | 1, 5, 10, 20, 30 |
 | Âmes sœurs | Même pronostic, réussi par les deux | 5, 15, 30, 50, 80 |
 | Globe-trotter | Victoires à l'extérieur correctement pronostiquées | 5, 10, 25, 50, 100 |
 | Rouleau compresseur | Réussis sur une victoire d'au moins 20 points | 1, 2, 5, 10, 20 |

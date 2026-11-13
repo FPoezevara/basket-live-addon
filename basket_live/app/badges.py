@@ -49,7 +49,7 @@ CATALOGUE: tuple[Badge, ...] = (
           lambda v, a: f"{pl(v, 'pronostic')} {'joué' if v <= 1 else 'joués'} cette saison."),
     Badge("sans_faute", "Sans-faute", "Sans-faute", "mdi:check-all", (1, 5, 10, 20, 30),
           lambda v, a: f"{pl(v, 'journée')} d'au moins 3 pronostics, tous réussis."),
-    Badge("duelliste", "Duelliste", "Duelliste", "mdi:sword-cross", (1, 5, 10, 20, 30),
+    Badge("duelliste", "Heartbreaker", "Heartbreaker", "mdi:heart-broken", (1, 5, 10, 20, 30),
           lambda v, a: f"{v} fois raison contre {a} sur un pronostic opposé."),
     Badge("ames_soeurs", "Âmes sœurs", "Âmes sœurs", "mdi:heart-multiple", (5, 15, 30, 50, 80),
           lambda v, a: f"{pl(v, 'pronostic')} {'identique' if v <= 1 else 'identiques'} et {'réussi' if v <= 1 else 'réussis'} avec {a}."),
@@ -156,7 +156,8 @@ class Badges:
         return v
 
     def calculer(self, historique: list[dict], saison: str) -> dict[str, list[dict]]:
-        """Badges obtenus (au moins une étoile) par joueur : ordre du catalogue, badges négatifs à la fin."""
+        """Tous les badges du catalogue par joueur, obtenus ou non (niveau 0 : affiché grisé) :
+        ordre du catalogue, badges négatifs à la fin."""
         sortie = {}
         for j in self.joueurs:
             valeurs = self.valeurs(historique, saison, j)
@@ -165,12 +166,11 @@ class Badges:
             obtenus = []
             for b in CATALOGUE:
                 n = b.niveau(valeurs[b.id])
-                if n:
-                    obtenus.append({
-                        "id": b.id, "nom": b.feminin if j in self.joueuses else b.masculin,
-                        "icone": b.icone, "niveau": n, "valeur": valeurs[b.id], "paliers": list(b.paliers),
-                        "negatif": b.negatif, "description": b.phrase(valeurs[b.id], autre),
-                    })
+                obtenus.append({
+                    "id": b.id, "nom": b.feminin if j in self.joueuses else b.masculin,
+                    "icone": b.icone, "niveau": n, "valeur": valeurs[b.id], "paliers": list(b.paliers),
+                    "negatif": b.negatif, "description": b.phrase(valeurs[b.id], autre),
+                })
             sortie[j] = sorted(obtenus, key=lambda b: b["negatif"])     # tri stable : ordre du catalogue conservé
         return sortie
 

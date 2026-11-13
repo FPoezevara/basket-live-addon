@@ -1,5 +1,5 @@
-/* Basket Live · Historique de saison 1.4.1 (badges du concours). Données MQTT locales uniquement : aucun appel API. */
-const HIST_VERSION = '1.4.1';
+/* Basket Live · Historique de saison 1.4.2 (badges du concours). Données MQTT locales uniquement : aucun appel API. */
+const HIST_VERSION = '1.4.2';
 const histEscape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const histNumber = value => value === null || value === undefined || value === '' ? '—'
   : typeof value === 'number' ? new Intl.NumberFormat('fr-FR', {maximumFractionDigits: 2}).format(value) : String(value);
@@ -355,10 +355,10 @@ class BasketPronosticsCard extends HTMLElement {
     return `<dialog class="fiche-badge${b.negatif ? ' negatif' : ''}" aria-label="${histEscape(b.nom)}"><div class="fiche" tabindex="-1" autofocus>
       <button class="fermer" aria-label="Fermer"><ha-icon icon="mdi:close"></ha-icon></button>
       <div class="fiche-tete"><span class="pastille grande niveau-${atteint}"><ha-icon icon="${histEscape(b.icone)}"></ha-icon></span>
-        <div><div class="fiche-joueur">${histEscape(j.nom)}</div><h3>${histEscape(b.nom)}</h3>
+        <div><div class="fiche-joueur">${histEscape(j.nom)}${atteint ? '' : ' · pas encore obtenu'}</div><h3>${histEscape(b.nom)}</h3>
           <span class="etoiles grandes" aria-label="${atteint} étoile${atteint > 1 ? 's' : ''} sur 5">${badgeEtoiles(atteint)}</span></div></div>
       <p class="fiche-texte">${histEscape(b.description)}</p>
-      <div class="progression"><div class="progression-libelle"><span>${suivant ? `Prochaine étoile à ${histEscape(histNumber(suivant))}` : 'Toutes les étoiles obtenues'}</span>
+      <div class="progression"><div class="progression-libelle"><span>${suivant ? `${atteint ? 'Prochaine' : 'Première'} étoile à ${histEscape(histNumber(suivant))}` : 'Toutes les étoiles obtenues'}</span>
         <b>${histEscape(histNumber(b.valeur))}${suivant ? ' / ' + histEscape(histNumber(suivant)) : ''}</b></div>
         <div class="jauge"><i style="width:${part}%"></i></div></div>
       <ol class="paliers">${paliers.map((v, k) => `<li class="${k < atteint ? 'acquis' : ''}">${badgeEtoiles(1, k < atteint ? 1 : 0, true)}<span>${histEscape(histNumber(v))}</span></li>`).join('')}</ol>
@@ -368,8 +368,9 @@ class BasketPronosticsCard extends HTMLElement {
   _badges(j) {
     const liste = Array.isArray(j.badges) ? j.badges : [];
     if (!liste.length) return '';
-    return `<div class="badges">${liste.map((b, i) => `<button class="badge${b.negatif ? ' negatif' : ''}" data-joueur="${histEscape(j.id)}" data-i="${i}"
-      aria-label="${histEscape(b.nom)}, ${Number(b.niveau) || 0} étoile${b.niveau > 1 ? 's' : ''} sur 5" title="${histEscape(b.nom)}">
+    // Badges sans étoile (niveau 0) : affichés grisés, consultables comme les autres.
+    return `<div class="badges">${liste.map((b, i) => `<button class="badge${b.negatif ? ' negatif' : ''}${Number(b.niveau) ? '' : ' non-obtenu'}" data-joueur="${histEscape(j.id)}" data-i="${i}"
+      aria-label="${histEscape(b.nom)}, ${Number(b.niveau) ? `${Number(b.niveau)} étoile${b.niveau > 1 ? 's' : ''} sur 5` : 'pas encore obtenu'}" title="${histEscape(b.nom)}">
       <span class="pastille niveau-${Number(b.niveau) || 0}"><ha-icon icon="${histEscape(b.icone)}"></ha-icon></span>
       <span class="etoiles">${badgeEtoilesPastille(Number(b.niveau) || 0)}</span></button>`).join('')}</div>`;
   }
@@ -493,6 +494,8 @@ const BADGES_STYLE = `
     border:2px solid #f5b80055; --mdc-icon-size:22px; color:var(--primary-text-color,#eef1f4); }
   .negatif .pastille { border-color:#e5484d55; }
   .pastille.niveau-5 { border-color:var(--or); box-shadow:0 0 10px #f5b80066; }
+  .badge.non-obtenu .pastille, .fiche-badge .pastille.niveau-0 { border-color:var(--divider-color,#333c43); color:var(--secondary-text-color,#7d8790); opacity:.45; }
+  .badge.non-obtenu .etoiles { opacity:.45; }
   .negatif .pastille.niveau-5 { border-color:var(--rouge); box-shadow:0 0 10px #e5484d66; }
   .etoiles { display:flex; }
   .badge .etoiles { flex-direction:column; align-items:center; }

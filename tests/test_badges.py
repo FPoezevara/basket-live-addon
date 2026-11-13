@@ -82,21 +82,24 @@ def test_sans_faute_et_series():
 
 def test_noms_genres_icones_et_ordre():
     obtenus = moteur().calculer(HISTO, SAISON)
-    f = {x["id"]: x for x in obtenus["francis"]}
-    i = {x["id"]: x for x in obtenus["ilona"]}
+    assert all(len(liste) == len(CATALOGUE) for liste in obtenus.values())   # tous les badges, même à 0
+    f = {x["id"]: x for x in obtenus["francis"] if x["niveau"]}
+    i = {x["id"]: x for x in obtenus["ilona"] if x["niveau"]}
     assert f["ultra"]["nom"] == "Ultra Nanterrien"
     assert i["judas"]["nom"] == "Judas" and i["judas"]["negatif"] is True
     assert i["malchanceux"]["nom"] == "Malchanceuse" and f["malchanceux"]["nom"] == "Malchanceux"
+    assert f["duelliste"]["nom"] == "Heartbreaker" and f["duelliste"]["icone"] == "mdi:heart-broken"
     assert f["duelliste"]["description"] == "2 fois raison contre Ilona sur un pronostic opposé."
     assert "ames_soeurs" not in f                                    # 1 < 5 : pas encore d'étoile
-    for cle in set(f) & set(i):                                      # même badge, même icône
-        assert f[cle]["icone"] == i[cle]["icone"]
+    for a, b in zip(obtenus["francis"], obtenus["ilona"]):           # même badge, même place, même icône
+        assert a["id"] == b["id"] and a["icone"] == b["icone"]
     ordre = [b.id for b in CATALOGUE]
     for liste in obtenus.values():                                   # catalogue, négatifs regroupés à la fin
         ids = [x["id"] for x in liste]
         assert ids == sorted(ids, key=lambda i: (PAR_ID[i].negatif, ordre.index(i)))
     assert [x["negatif"] for x in obtenus["ilona"]][-3:] == [True, True, True]
-    assert all(x["niveau"] >= 1 for x in obtenus["francis"] + obtenus["ilona"])
+    zero = next(x for x in obtenus["francis"] if x["id"] == "ames_soeurs")
+    assert zero["niveau"] == 0 and zero["valeur"] == 1
     assert "lucky_streak" not in f                                   # 3 < 5 : pas encore d'étoile
     noms = {b.id: (b.masculin, b.feminin) for b in CATALOGUE}
     assert noms["lucky_streak"] == ("Lucky Streak", "Lucky Streak")
@@ -165,8 +168,9 @@ def test_bout_en_bout_dans_l_app(tmp_path):
     app.publier()
     classement = json.loads(bus.retenus["basket_live/classement/attributs"])["joueurs"]
     ilona = next(j for j in classement if j["id"] == "ilona")
-    assert {b["id"] for b in ilona["badges"]} == {"ultra", "chanceux"}
-    assert next(j for j in classement if j["id"] == "francis")["badges"] == []
+    assert {b["id"] for b in ilona["badges"] if b["niveau"]} == {"ultra", "chanceux"}
+    francis = next(j for j in classement if j["id"] == "francis")["badges"]
+    assert len(francis) == 14 and not any(b["niveau"] for b in francis)
     echeances = json.loads(bus.retenus["basket_live/notifications/attributs"])["echeances"]
     annonce = next(e for e in echeances if e["type"] == "badge")
     assert annonce["personne"] == "ilona"

@@ -198,3 +198,19 @@ test('égalité : une rangée de badges par personne dans la tuile commune',()=>
   assert.match(html,/Égalité de l'amour/);
   assert.equal((html.match(/class="badges-egalite"/g)||[]).length,2);
 });
+
+test('badge sans étoile : pastille grisée, consultable, première étoile annoncée',()=>{
+  const {card,hass,listeners}=fixturePronos();
+  const j=hass.states['sensor.basket_live_classement'].attributes.joueurs;
+  j[0].badges.push({id:'duelliste',nom:'Heartbreaker',icone:'mdi:heart-broken',niveau:0,valeur:0,paliers:[1,5,10,20,30],negatif:false,description:'0 fois raison'});
+  hass.states['sensor.basket_live_classement']={...hass.states['sensor.basket_live_classement']};
+  card.hass=hass;
+  let html=card.shadowRoot.innerHTML;
+  assert.match(html,/class="badge non-obtenu" data-joueur="francis" data-i="1"/);
+  assert.match(html,/Heartbreaker, pas encore obtenu/);
+  const bouton={dataset:{joueur:'francis',i:'1'}};
+  listeners.click({target:{closest:sel=>sel==='button.badge'?bouton:null}});
+  html=card.shadowRoot.innerHTML;
+  assert.match(html,/Francis · pas encore obtenu/);
+  assert.match(html,/Première étoile à 1/);
+});

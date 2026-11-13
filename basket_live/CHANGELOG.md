@@ -1,5 +1,10 @@
 # Journal des versions
 
+## 0.8.2
+
+- Tous les badges sont publiés pour chaque joueur, y compris ceux sans étoile (niveau 0), pour être affichés grisés par la carte Historique 1.4.2.
+- « Duelliste » devient « Heartbreaker », avec un cœur brisé pour icône ; critère inchangé.
+
 ## 0.8.1
 
 - Badges négatifs (Judas, Malchanceux/Malchanceuse, Chat noir) regroupés à la fin de la liste de chaque joueur. Aucune autre modification ; package et carte inchangés.
